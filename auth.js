@@ -29,7 +29,7 @@ window.AMCSD_AUTH_READY = (async () => {
   if (!username || !password) return null;
 
   try {
-    const res = await fetch('https://www.odr.io/api/v4/token', {
+    const res = await fetch('https://www.rruff.net/odr_rruff/api/v4/token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username, password }),

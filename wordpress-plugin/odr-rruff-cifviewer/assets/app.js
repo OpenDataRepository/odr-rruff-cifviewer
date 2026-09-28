@@ -676,6 +676,9 @@ function buildAtomDatasetsOutput(data) {
 let currentCifData = null;
 let currentApiRecord = null;
 let currentFileName = '';
+let currentGMatrix = null;
+let currentCellParams = null;
+let currentCellVolume = null;
 
 // A fixed row count either wastes space (short header) or forces scrolling (long
 // one with a big atom table) - grow the textarea to fit its content instead.
@@ -684,9 +687,43 @@ function autoSizeTextarea(textarea) {
   textarea.style.height = `${textarea.scrollHeight}px`;
 }
 
+const METRIC_TENSOR_AXES = ['a', 'b', 'c'];
+
+function renderMetricTensorTable(container, G) {
+  if (!G) {
+    container.innerHTML = '';
+    return;
+  }
+  const headerRow = `<tr><th></th>${METRIC_TENSOR_AXES.map(axis => `<th>${axis}</th>`).join('')}</tr>`;
+  const bodyRows = G.map((row, i) => {
+    const cells = row.map((v, j) => `<td${i === j ? ' class="diagonal"' : ''}>${v.toFixed(4)}</td>`).join('');
+    return `<tr><th>${METRIC_TENSOR_AXES[i]}</th>${cells}</tr>`;
+  }).join('');
+  container.innerHTML = `<table class="matrix-table"><thead>${headerRow}</thead><tbody>${bodyRows}</tbody></table>`;
+}
+
 function renderData(data) {
   const crystalSystem = getCrystalSystem(data);
   document.getElementById('crystalSystemDisplay').textContent = crystalSystem ? `Crystal System: ${crystalSystem}` : '';
+
+  const metricTensorOutput = document.getElementById('metricTensorOutput');
+  const a = parseFloat(stripUncertainty(getTag(data, '_cell_length_a') || ''));
+  const b = parseFloat(stripUncertainty(getTag(data, '_cell_length_b') || ''));
+  const c = parseFloat(stripUncertainty(getTag(data, '_cell_length_c') || ''));
+  const alpha = parseFloat(stripUncertainty(getTag(data, '_cell_angle_alpha') || ''));
+  const beta = parseFloat(stripUncertainty(getTag(data, '_cell_angle_beta') || ''));
+  const gamma = parseFloat(stripUncertainty(getTag(data, '_cell_angle_gamma') || ''));
+  const G = [a, b, c, alpha, beta, gamma].every(Number.isFinite)
+    ? computeMetricTensor(a, b, c, alpha, beta, gamma)
+    : null;
+  renderMetricTensorTable(metricTensorOutput, G);
+  // Stays hidden until a CIF with a full set of cell parameters is loaded.
+  document.getElementById('metricTensorSection').hidden = !G;
+  currentGMatrix = G;
+  currentCellParams = G ? { a, b, c, alpha, beta, gamma } : null;
+  currentCellVolume = G ? computeCellVolume(a, b, c, alpha, beta, gamma) : null;
+  document.getElementById('cellVolumeDisplay').textContent = currentCellVolume ? `Unit cell volume: ${currentCellVolume.toFixed(4)} Å³` : '';
+
   const amcHeaderOutput = document.getElementById('amcHeaderOutput');
   amcHeaderOutput.value = buildAmcHeader(data, currentApiRecord, currentFileName);
   autoSizeTextarea(amcHeaderOutput);
@@ -704,8 +741,11 @@ document.getElementById('fileInput').addEventListener('change', event => {
   reader.readAsText(file);
 });
 
-// window.AMCSD_API_TOKEN is set server-side by cif-viewer.php from the
-// stored plugin setting.
+// odrRruffCifViewer is injected by odr-rruff-cifviewer.php via
+// wp_localize_script; the token is generated server-side so the API
+// credentials never reach the browser.
+const cifViewerConfig = typeof window.odrRruffCifViewer === 'object' && window.odrRruffCifViewer ? window.odrRruffCifViewer : {};
+
 let lastApiRequestTime = 0;
 
 async function rateLimitedFetch(url, options) {
@@ -716,7 +756,7 @@ async function rateLimitedFetch(url, options) {
 }
 
 async function fetchAmcsdRecord(uuid, token) {
-  const res = await rateLimitedFetch(`https://www.odr.io/api/v4/dataset/record/${uuid}`, {
+  const res = await rateLimitedFetch(`${cifViewerConfig.recordUrl || 'https://www.rruff.net/odr_rruff/api/v4/dataset/record/'}${uuid}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!res.ok) throw new Error(`Request failed: ${res.status} ${res.statusText}`);
@@ -727,7 +767,7 @@ async function fetchRecordForUuid(uuid) {
   const status = document.getElementById('apiStatus');
   status.textContent = 'Fetching...';
   try {
-    const token = typeof window.AMCSD_API_TOKEN === 'string' ? window.AMCSD_API_TOKEN : '';
+    const token = typeof cifViewerConfig.token === 'string' ? cifViewerConfig.token : '';
     currentApiRecord = await fetchAmcsdRecord(uuid, token);
     status.textContent = 'Fetched successfully.';
     if (currentCifData) renderData(currentCifData);
@@ -753,6 +793,41 @@ function copyTextarea(id) {
 
 document.getElementById('copyHeaderBtn').addEventListener('click', () => copyTextarea('amcHeaderOutput'));
 document.getElementById('copyCitationBtn').addEventListener('click', () => copyTextarea('citationOutput'));
+
+// Runs a submit.js call, showing "Sending..." then the result in `statusId` -
+// shared by every "Send" button so each one only has to say what to send.
+async function runSubmit(statusId, submitFn) {
+  const status = document.getElementById(statusId);
+  status.textContent = 'Sending...';
+  try {
+    await submitFn();
+    status.textContent = 'Sent.';
+  } catch (err) {
+    status.textContent = `Error: ${err.message}`;
+  }
+}
+
+function currentDatabaseCode() {
+  return getApiField(currentApiRecord, 'database_code_amcsd') ||
+    (currentCifData ? getTag(currentCifData, '_database_code_amcsd') : undefined);
+}
+
+document.getElementById('sendHeaderBtn').addEventListener('click', () => {
+  runSubmit('sendHeaderStatus', () => submitAmcHeader({
+    headerText: document.getElementById('amcHeaderOutput').value,
+    databaseCode: currentDatabaseCode(),
+    mineralName: currentCifData ? getMineralName(currentCifData, currentApiRecord, currentFileName) : '',
+  }));
+});
+
+document.getElementById('sendGMatrixBtn').addEventListener('click', () => {
+  runSubmit('sendGMatrixStatus', () => submitGMatrix({
+    gMatrix: currentGMatrix,
+    cell: currentCellParams,
+    cellVolume: currentCellVolume,
+    databaseCode: currentDatabaseCode(),
+  }));
+});
 
 function wrapText(text, maxWidth) {
   const words = text.split(' ');

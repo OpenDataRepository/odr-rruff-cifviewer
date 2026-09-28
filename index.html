@@ -18,16 +18,21 @@
       <div id="apiStatus"></div>
     </div>
 
-    <div id="metricTensorSection">
-      <h3>G-Matrix</h3>
-      <div id="metricTensorOutput"></div>
-    </div>
-
     <div id="output">
       <h3>AMC Header</h3>
       <button id="copyHeaderBtn">Copy</button>
+      <button id="sendHeaderBtn" hidden>Send</button>
       <textarea id="amcHeaderOutput" readonly rows="1"></textarea>
       <p id="crystalSystemDisplay"></p>
+      <div id="sendHeaderStatus" hidden></div>
+    </div>
+
+    <div id="metricTensorSection" hidden>
+      <h3>G-Matrix</h3>
+      <div id="metricTensorOutput"></div>
+      <p id="cellVolumeDisplay"></p>
+      <button id="sendGMatrixBtn" hidden>Send</button>
+      <div id="sendGMatrixStatus" hidden></div>
     </div>
 
     <div id="amcToCifSection">
@@ -36,7 +41,9 @@
       <input type="file" id="amcFileInput" accept=".amc,text/plain">
       <div id="amcToCifStatus"></div>
       <button id="copyAmcToCifBtn">Copy</button>
+      <button id="sendAmcToCifBtn" hidden>Send</button>
       <textarea id="amcToCifOutput" readonly rows="1"></textarea>
+      <div id="sendAmcToCifStatus" hidden></div>
     </div>
 
     <div id="citationSection">
@@ -52,6 +59,7 @@
 
   <script src="spacegroups.js"></script>
   <script src="auth.js"></script>
+  <script src="submit.js"></script>
   <script src="app.js"></script>
   <script src="amc2cif.js"></script>
   <script src="amc2cif-ui.js"></script>
