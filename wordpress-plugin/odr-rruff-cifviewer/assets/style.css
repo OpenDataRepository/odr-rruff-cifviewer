@@ -81,7 +81,39 @@
   font-weight: bold;
 }
 
+.cif-viewer-app .matrix-table {
+  border-collapse: collapse;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 0.9rem;
+  margin: 0.25rem 0 0.75rem;
+}
+
+.cif-viewer-app .matrix-table th,
+.cif-viewer-app .matrix-table td {
+  padding: 0.5rem 1rem;
+  text-align: center;
+  border: 1px solid var(--cifv-border);
+}
+
+.cif-viewer-app .matrix-table thead th,
+.cif-viewer-app .matrix-table tbody th {
+  background: var(--cifv-panel-bg);
+  font-style: italic;
+  font-weight: 600;
+}
+
+.cif-viewer-app .matrix-table td.diagonal {
+  background: #eef4ff;
+  font-weight: 600;
+}
+
 .cif-viewer-app #amcToCifSection input[type="file"] {
   display: block;
   margin-bottom: 0.5rem;
+}
+
+/* Theme button styles often set display, which would override the hidden
+   attribute on the (not yet usable) Send buttons. */
+.cif-viewer-app [hidden] {
+  display: none !important;
 }

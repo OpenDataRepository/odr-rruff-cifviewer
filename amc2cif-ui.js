@@ -1,6 +1,9 @@
+let currentAmcFileName = '';
+
 document.getElementById('amcFileInput').addEventListener('change', event => {
   const file = event.target.files[0];
   if (!file) return;
+  currentAmcFileName = file.name;
   const status = document.getElementById('amcToCifStatus');
   const output = document.getElementById('amcToCifOutput');
   const reader = new FileReader();
@@ -18,3 +21,11 @@ document.getElementById('amcFileInput').addEventListener('change', event => {
 });
 
 document.getElementById('copyAmcToCifBtn').addEventListener('click', () => copyTextarea('amcToCifOutput'));
+
+document.getElementById('sendAmcToCifBtn').addEventListener('click', () => {
+  runSubmit('sendAmcToCifStatus', () => submitAmcToCif({
+    fileText: document.getElementById('amcToCifOutput').value,
+    direction: 'amc-to-cif',
+    sourceFileName: currentAmcFileName,
+  }));
+});

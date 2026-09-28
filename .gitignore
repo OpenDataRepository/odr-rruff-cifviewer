@@ -1,3 +1,5 @@
 .env
 OneAPIGET
 .claude
+wordpress-plugin/odr-rruff-cifviewer/vendor/
+wordpress-plugin/odr-rruff-cifviewer/composer.lock
