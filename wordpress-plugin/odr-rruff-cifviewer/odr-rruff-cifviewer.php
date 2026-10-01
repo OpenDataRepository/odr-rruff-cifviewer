@@ -2,7 +2,7 @@
 /**
  * Plugin Name: ODR RRUFF CIF Viewer
  * Description: Reads a CIF and creates the AMC header
- * Version: 1.0.1
+ * Version: 1.0.2
  * Author: Nathan
  */
 
@@ -10,7 +10,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'CIF_VIEWER_VERSION', '1.0.1' );
+define( 'CIF_VIEWER_VERSION', '1.0.2' );
 define( 'CIF_VIEWER_URL', plugin_dir_url( __FILE__ ) );
 define( 'CIF_VIEWER_TOKEN_URL', 'https://www.rruff.net/odr_rruff/api/v4/token' );
 define( 'CIF_VIEWER_RECORD_URL', 'https://www.rruff.net/odr_rruff/api/v4/dataset/record/' );
@@ -25,6 +25,33 @@ function cif_viewer_env_dirs() {
 	return array( dirname( ABSPATH ), ABSPATH );
 }
 
+// Directory path for messages, with the trailing slash dropped.
+function cif_viewer_env_dir_label( $dir ) {
+	return rtrim( $dir, '/\\' );
+}
+
+// Records why the server couldn't get a token (and logs it), so the shortcode
+// can show the reason to admins instead of the page just failing with a 403.
+function cif_viewer_token_error( $message = null ) {
+	static $error = '';
+	if ( null !== $message ) {
+		$error = $message;
+		error_log( 'CIF Viewer: ' . $message );
+	}
+	return $error;
+}
+
+// Path of the .env file that was found, or '' if none was.
+function cif_viewer_env_file() {
+	foreach ( cif_viewer_env_dirs() as $dir ) {
+		$file = rtrim( $dir, '/\\' ) . '/.env';
+		if ( is_readable( $file ) ) {
+			return $file;
+		}
+	}
+	return '';
+}
+
 // Returns the KEY => value pairs from the .env file itself, loaded once. They
 // are kept apart from the server environment so a generic name like
 // "username" can't pick up an unrelated system variable (on Windows,
@@ -36,33 +63,30 @@ function cif_viewer_dotenv() {
 	}
 	$values = array();
 
-	foreach ( cif_viewer_env_dirs() as $dir ) {
-		$file = rtrim( $dir, '/\\' ) . '/.env';
-		if ( ! is_readable( $file ) ) {
+	$file = cif_viewer_env_file();
+	if ( '' === $file ) {
+		return $values;
+	}
+
+	if ( file_exists( __DIR__ . '/vendor/autoload.php' ) ) {
+		require_once __DIR__ . '/vendor/autoload.php';
+	}
+	if ( class_exists( 'Dotenv\Dotenv' ) ) {
+		$values = Dotenv\Dotenv::parse( file_get_contents( $file ) );
+		return $values;
+	}
+
+	// No Composer install - parse the KEY=value lines ourselves.
+	foreach ( file( $file, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES ) as $line ) {
+		$line = trim( $line );
+		if ( '' === $line || '#' === $line[0] || false === strpos( $line, '=' ) ) {
 			continue;
 		}
-
-		if ( file_exists( __DIR__ . '/vendor/autoload.php' ) ) {
-			require_once __DIR__ . '/vendor/autoload.php';
+		list( $key, $value ) = array_map( 'trim', explode( '=', $line, 2 ) );
+		if ( strlen( $value ) >= 2 && ( '"' === $value[0] || "'" === $value[0] ) && substr( $value, -1 ) === $value[0] ) {
+			$value = substr( $value, 1, -1 );
 		}
-		if ( class_exists( 'Dotenv\Dotenv' ) ) {
-			$values = Dotenv\Dotenv::parse( file_get_contents( $file ) );
-			return $values;
-		}
-
-		// No Composer install - parse the KEY=value lines ourselves.
-		foreach ( file( $file, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES ) as $line ) {
-			$line = trim( $line );
-			if ( '' === $line || '#' === $line[0] || false === strpos( $line, '=' ) ) {
-				continue;
-			}
-			list( $key, $value ) = array_map( 'trim', explode( '=', $line, 2 ) );
-			if ( strlen( $value ) >= 2 && ( '"' === $value[0] || "'" === $value[0] ) && substr( $value, -1 ) === $value[0] ) {
-				$value = substr( $value, 1, -1 );
-			}
-			$values[ $key ] = $value;
-		}
-		return $values;
+		$values[ $key ] = $value;
 	}
 	return $values;
 }
@@ -106,9 +130,11 @@ function cif_viewer_generate_token() {
 		$client_secret = isset( $dotenv['password'] ) ? $dotenv['password'] : '';
 	}
 	if ( '' === $client_id || '' === $client_secret ) {
-		// Stay quiet when the settings-page token is deliberately used instead.
-		if ( '' === get_option( 'cif_viewer_api_token', '' ) ) {
-			error_log( 'CIF Viewer: no API credentials found - set API_CLIENT_ID and API_CLIENT_SECRET (or username and password) in a .env in: ' . implode( ', ', cif_viewer_env_dirs() ) );
+		$env_file = cif_viewer_env_file();
+		if ( '' === $env_file ) {
+			cif_viewer_token_error( 'no .env file found - put it in one of: ' . implode( ', ', array_map( 'cif_viewer_env_dir_label', cif_viewer_env_dirs() ) ) . ' (not the plugin folder)' );
+		} else {
+			cif_viewer_token_error( 'found ' . $env_file . ' but it has no API_CLIENT_ID / API_CLIENT_SECRET (or username / password) values' );
 		}
 		return '';
 	}
@@ -122,20 +148,20 @@ function cif_viewer_generate_token() {
 		)
 	);
 	if ( is_wp_error( $res ) ) {
-		error_log( 'CIF Viewer: token request failed: ' . $res->get_error_message() );
+		cif_viewer_token_error( 'token request to ' . CIF_VIEWER_TOKEN_URL . ' failed: ' . $res->get_error_message() );
 		return '';
 	}
 	$code = wp_remote_retrieve_response_code( $res );
 	$body = wp_remote_retrieve_body( $res );
 	if ( $code < 200 || $code >= 300 ) {
-		error_log( 'CIF Viewer: token request failed with HTTP ' . $code );
+		cif_viewer_token_error( 'token request was rejected with HTTP ' . $code . ' - check the credentials in the .env' );
 		return '';
 	}
 
 	$data  = json_decode( $body, true );
 	$token = is_array( $data ) ? ( $data['token'] ?? $data['access_token'] ?? $data['jwt'] ?? '' ) : trim( $body );
 	if ( ! is_string( $token ) || '' === $token ) {
-		error_log( 'CIF Viewer: token response did not include a token' );
+		cif_viewer_token_error( 'token response did not include a token' );
 		return '';
 	}
 
@@ -224,18 +250,22 @@ function cif_viewer_shortcode() {
 	// Done here rather than at enqueue time so the token is only generated on
 	// pages that actually show the viewer. The scripts load in the footer, so
 	// this still lands before they're printed.
-	$token = cif_viewer_generate_token();
-	if ( '' === $token ) {
-		$token = get_option( 'cif_viewer_api_token', '' );
+	$token        = cif_viewer_generate_token();
+	$token_source = '' === $token ? '' : '.env';
+	if ( '' === $token && '' !== get_option( 'cif_viewer_api_token', '' ) ) {
+		$token        = get_option( 'cif_viewer_api_token', '' );
+		$token_source = 'settings page';
 	}
-	wp_localize_script(
-		'cif-viewer-app',
-		'odrRruffCifViewer',
-		array(
-			'token'     => $token,
-			'recordUrl' => CIF_VIEWER_RECORD_URL,
-		)
+	$config = array(
+		'token'     => $token,
+		'recordUrl' => CIF_VIEWER_RECORD_URL,
 	);
+	// Only admins see why the token is missing; visitors get a generic message.
+	if ( current_user_can( 'manage_options' ) ) {
+		$config['tokenSource'] = $token_source;
+		$config['tokenError']  = cif_viewer_token_error();
+	}
+	wp_localize_script( 'cif-viewer-app', 'odrRruffCifViewer', $config );
 
 	ob_start();
 	?>
@@ -243,9 +273,11 @@ function cif_viewer_shortcode() {
 		<h1>CIF Viewer</h1>
 
 		<div id="panel">
-			<p>Select a .cif file to read its data.</p>
-
-			<input type="file" id="fileInput" accept=".cif,text/plain">
+			<label class="drop-zone">
+			  <input type="file" id="fileInput" accept=".cif,text/plain">
+			  <span class="drop-zone-prompt">Drag &amp; drop a .cif file here, or <span class="drop-zone-link">choose a file</span></span>
+			  <span class="drop-zone-file"></span>
+			</label>
 
 			<div id="apiSection">
 				<h3>AMCSD Record</h3>
@@ -271,8 +303,11 @@ function cif_viewer_shortcode() {
 
 			<div id="amcToCifSection">
 				<h3>AMC &rarr; CIF</h3>
-				<p>Select a .amc file to convert it to CIF.</p>
-				<input type="file" id="amcFileInput" accept=".amc,text/plain">
+				<label class="drop-zone">
+				  <input type="file" id="amcFileInput" accept=".amc,text/plain">
+				  <span class="drop-zone-prompt">Drag &amp; drop a .amc file here, or <span class="drop-zone-link">choose a file</span></span>
+				  <span class="drop-zone-file"></span>
+				</label>
 				<div id="amcToCifStatus"></div>
 				<button id="copyAmcToCifBtn" class="cif-viewer-btn" type="button">Copy</button>
 				<button id="sendAmcToCifBtn" hidden class="cif-viewer-btn" type="button">Send</button>

@@ -9,9 +9,11 @@
   <h1>CIF Viewer</h1>
 
   <div id="panel">
-    <p>Select a .cif file to read its data.</p>
-
-    <input type="file" id="fileInput" accept=".cif,text/plain">
+    <label class="drop-zone">
+      <input type="file" id="fileInput" accept=".cif,text/plain">
+      <span class="drop-zone-prompt">Drag &amp; drop a .cif file here, or <span class="drop-zone-link">choose a file</span></span>
+      <span class="drop-zone-file"></span>
+    </label>
 
     <div id="apiSection">
       <h3>AMCSD Record</h3>
@@ -37,8 +39,11 @@
 
     <div id="amcToCifSection">
       <h3>AMC &rarr; CIF</h3>
-      <p>Select a .amc file to convert it to CIF.</p>
-      <input type="file" id="amcFileInput" accept=".amc,text/plain">
+      <label class="drop-zone">
+        <input type="file" id="amcFileInput" accept=".amc,text/plain">
+        <span class="drop-zone-prompt">Drag &amp; drop a .amc file here, or <span class="drop-zone-link">choose a file</span></span>
+        <span class="drop-zone-file"></span>
+      </label>
       <div id="amcToCifStatus"></div>
       <button id="copyAmcToCifBtn">Copy</button>
       <button id="sendAmcToCifBtn" hidden>Send</button>

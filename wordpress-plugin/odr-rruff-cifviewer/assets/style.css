@@ -21,11 +21,6 @@
   padding: 1.5rem;
 }
 
-.cif-viewer-app #fileInput {
-  font-size: 1.15rem;
-  padding: 0.6rem 1rem 0.6rem 0;
-}
-
 .cif-viewer-app textarea {
   width: 100%;
   font-family: ui-monospace, Consolas, monospace;
@@ -107,13 +102,62 @@
   font-weight: 600;
 }
 
-.cif-viewer-app #amcToCifSection input[type="file"] {
-  display: block;
-  margin-bottom: 0.5rem;
-}
 
 /* Theme button styles often set display, which would override the hidden
    attribute on the (not yet usable) Send buttons. */
 .cif-viewer-app [hidden] {
   display: none !important;
+}
+
+.cif-viewer-app .drop-zone {
+  position: relative;
+  display: block;
+  margin: 0.5rem 0 1rem;
+  padding: 1.5rem 1rem;
+  border: 2px dashed var(--cifv-border);
+  border-radius: 12px;
+  background: var(--cifv-bg);
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 0.15s, background-color 0.15s;
+}
+
+.cif-viewer-app .drop-zone:hover,
+.cif-viewer-app .drop-zone:focus-within {
+  border-color: #6a8fd8;
+}
+
+.cif-viewer-app .drop-zone.dragover {
+  border-color: #3b6fd8;
+  background: #eef4ff;
+}
+
+/* Visually hidden but still focusable, so keyboard users can open the picker. */
+.cif-viewer-app .drop-zone input[type="file"] {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  overflow: hidden;
+}
+
+.cif-viewer-app .drop-zone-prompt {
+  display: block;
+  font-size: 1.05rem;
+}
+
+.cif-viewer-app .drop-zone-link {
+  color: #3b6fd8;
+  text-decoration: underline;
+}
+
+.cif-viewer-app .drop-zone-file {
+  display: block;
+  margin-top: 0.4rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.cif-viewer-app .drop-zone-file:empty {
+  display: none;
 }
