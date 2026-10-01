@@ -676,6 +676,9 @@ function buildAtomDatasetsOutput(data) {
 let currentCifData = null;
 let currentApiRecord = null;
 let currentFileName = '';
+let currentGMatrix = null;
+let currentCellParams = null;
+let currentCellVolume = null;
 
 // A fixed row count either wastes space (short header) or forces scrolling (long
 // one with a big atom table) - grow the textarea to fit its content instead.
@@ -714,6 +717,12 @@ function renderData(data) {
     ? computeMetricTensor(a, b, c, alpha, beta, gamma)
     : null;
   renderMetricTensorTable(metricTensorOutput, G);
+  // Stays hidden until a CIF with a full set of cell parameters is loaded.
+  document.getElementById('metricTensorSection').hidden = !G;
+  currentGMatrix = G;
+  currentCellParams = G ? { a, b, c, alpha, beta, gamma } : null;
+  currentCellVolume = G ? computeCellVolume(a, b, c, alpha, beta, gamma) : null;
+  document.getElementById('cellVolumeDisplay').textContent = currentCellVolume ? `Unit cell volume: ${currentCellVolume.toFixed(4)} Å³` : '';
 
   const amcHeaderOutput = document.getElementById('amcHeaderOutput');
   amcHeaderOutput.value = buildAmcHeader(data, currentApiRecord, currentFileName);
@@ -749,7 +758,7 @@ async function rateLimitedFetch(url, options) {
 }
 
 async function fetchAmcsdRecord(uuid, token) {
-  const res = await rateLimitedFetch(`https://www.odr.io/api/v4/dataset/record/${uuid}`, {
+  const res = await rateLimitedFetch(`https://www.rruff.net/odr_rruff/api/v4/dataset/record/${uuid}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!res.ok) throw new Error(`Request failed: ${res.status} ${res.statusText}`);
@@ -786,6 +795,41 @@ function copyTextarea(id) {
 
 document.getElementById('copyHeaderBtn').addEventListener('click', () => copyTextarea('amcHeaderOutput'));
 document.getElementById('copyCitationBtn').addEventListener('click', () => copyTextarea('citationOutput'));
+
+// Runs a submit.js call, showing "Sending..." then the result in `statusId` -
+// shared by every "Send" button so each one only has to say what to send.
+async function runSubmit(statusId, submitFn) {
+  const status = document.getElementById(statusId);
+  status.textContent = 'Sending...';
+  try {
+    await submitFn();
+    status.textContent = 'Sent.';
+  } catch (err) {
+    status.textContent = `Error: ${err.message}`;
+  }
+}
+
+function currentDatabaseCode() {
+  return getApiField(currentApiRecord, 'database_code_amcsd') ||
+    (currentCifData ? getTag(currentCifData, '_database_code_amcsd') : undefined);
+}
+
+document.getElementById('sendHeaderBtn').addEventListener('click', () => {
+  runSubmit('sendHeaderStatus', () => submitAmcHeader({
+    headerText: document.getElementById('amcHeaderOutput').value,
+    databaseCode: currentDatabaseCode(),
+    mineralName: currentCifData ? getMineralName(currentCifData, currentApiRecord, currentFileName) : '',
+  }));
+});
+
+document.getElementById('sendGMatrixBtn').addEventListener('click', () => {
+  runSubmit('sendGMatrixStatus', () => submitGMatrix({
+    gMatrix: currentGMatrix,
+    cell: currentCellParams,
+    cellVolume: currentCellVolume,
+    databaseCode: currentDatabaseCode(),
+  }));
+});
 
 function wrapText(text, maxWidth) {
   const words = text.split(' ');

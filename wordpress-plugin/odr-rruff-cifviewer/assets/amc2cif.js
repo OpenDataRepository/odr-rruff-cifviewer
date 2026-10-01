@@ -174,6 +174,11 @@ function computeMetricTensor(a, b, c, alpha, beta, gamma) {
   return G;
 }
 
+function determinant3x3(m) {
+  const [[a, b, c], [d, e, f], [g, h, i]] = m;
+  return a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g);
+}
+
 // Inverts a 3x3 matrix via the adjugate/cofactor method - used to turn the
 // (real-space) metric tensor G into the reciprocal metric tensor G*.
 function invertMatrix3x3(m) {
@@ -193,6 +198,12 @@ function invertMatrix3x3(m) {
     [B / det, E / det, H / det],
     [C / det, F / det, I / det],
   ];
+}
+
+// Unit cell volume = sqrt(det(G)) - the metric tensor's determinant is the
+// square of the volume of the parallelepiped the cell edges a,b,c span.
+function computeCellVolume(a, b, c, alpha, beta, gamma) {
+  return Math.sqrt(determinant3x3(computeMetricTensor(a, b, c, alpha, beta, gamma)));
 }
 
 // Reciprocal cell lengths a*, b*, c*, from G* = inverse(G) - needed to convert

@@ -1,0 +1,8 @@
+{
+    "name": "odr-rruff/cifviewer",
+    "description": "ODR RRUFF CIF Viewer WordPress plugin",
+    "type": "wordpress-plugin",
+    "require": {
+        "vlucas/phpdotenv": "^5.6"
+    }
+}
