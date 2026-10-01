@@ -1,5 +1,7 @@
 let currentAmcFileName = '';
 
+setupDropZone(document.getElementById('amcFileInput'));
+
 document.getElementById('amcFileInput').addEventListener('change', event => {
   const file = event.target.files[0];
   if (!file) return;
