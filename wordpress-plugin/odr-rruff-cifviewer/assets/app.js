@@ -729,6 +729,62 @@ function renderData(data) {
   autoSizeTextarea(amcHeaderOutput);
 }
 
+// Dropping a file onto a .drop-zone feeds it through the zone's file input
+// and fires 'change', so drag-and-drop and "choose a file" share one handler.
+function setupDropZone(input) {
+  const zone = input.closest('.drop-zone');
+  const fileLabel = zone.querySelector('.drop-zone-file');
+  const allowedExts = input.accept.split(',').map(s => s.trim().toLowerCase()).filter(s => s.startsWith('.'));
+  if (input.accept.includes('text/plain')) allowedExts.push('.txt');
+
+  input.addEventListener('change', () => {
+    const file = input.files[0];
+    fileLabel.textContent = file ? file.name : '';
+    zone.classList.toggle('has-file', !!file);
+  });
+
+  let dragDepth = 0;
+  zone.addEventListener('dragenter', event => {
+    event.preventDefault();
+    dragDepth++;
+    zone.classList.add('dragover');
+  });
+  zone.addEventListener('dragover', event => {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'copy';
+  });
+  zone.addEventListener('dragleave', () => {
+    if (--dragDepth <= 0) {
+      dragDepth = 0;
+      zone.classList.remove('dragover');
+    }
+  });
+  zone.addEventListener('drop', event => {
+    event.preventDefault();
+    dragDepth = 0;
+    zone.classList.remove('dragover');
+    const file = event.dataTransfer.files[0];
+    if (!file) return;
+    const name = file.name.toLowerCase();
+    if (allowedExts.length && !allowedExts.some(ext => name.endsWith(ext))) {
+      fileLabel.textContent = `Not a ${allowedExts[0]} file: ${file.name}`;
+      zone.classList.remove('has-file');
+      return;
+    }
+    const transfer = new DataTransfer();
+    transfer.items.add(file);
+    input.files = transfer.files;
+    input.dispatchEvent(new Event('change'));
+  });
+}
+
+// A file dropped just outside a drop zone would otherwise make the browser
+// navigate away from the page to open it.
+window.addEventListener('dragover', event => event.preventDefault());
+window.addEventListener('drop', event => event.preventDefault());
+
+setupDropZone(document.getElementById('fileInput'));
+
 document.getElementById('fileInput').addEventListener('change', event => {
   const file = event.target.files[0];
   if (!file) return;
@@ -742,7 +798,9 @@ document.getElementById('fileInput').addEventListener('change', event => {
 });
 
 // odrRruffCifViewer is injected by odr-rruff-cifviewer.php via
-// wp_localize_script; the token is generated server-side so the API
+// wp_localize_script. Records are fetched through the plugin's own REST route,
+// which calls the ODR API server-side: the browser can't call the API directly
+// because it answers the CORS preflight with 405, and this way the token and
 // credentials never reach the browser.
 const cifViewerConfig = typeof window.odrRruffCifViewer === 'object' && window.odrRruffCifViewer ? window.odrRruffCifViewer : {};
 
@@ -755,20 +813,31 @@ async function rateLimitedFetch(url, options) {
   return fetch(url, options);
 }
 
-async function fetchAmcsdRecord(uuid, token) {
-  const res = await rateLimitedFetch(`${cifViewerConfig.recordUrl || 'https://www.rruff.net/odr_rruff/api/v4/dataset/record/'}${uuid}`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  if (!res.ok) throw new Error(`Request failed: ${res.status} ${res.statusText}`);
+async function fetchAmcsdRecord(uuid) {
+  // The nonce lets WordPress recognise a logged-in admin, so the route can
+  // include the detailed reason when something goes wrong.
+  const headers = cifViewerConfig.restNonce ? { 'X-WP-Nonce': cifViewerConfig.restNonce } : {};
+  const res = await rateLimitedFetch(`${cifViewerConfig.recordProxyUrl}${encodeURIComponent(uuid)}`, { headers, credentials: 'same-origin' });
+  if (!res.ok) {
+    let message = `Request failed: ${res.status} ${res.statusText}`;
+    try {
+      const body = await res.json();
+      if (body && body.message) message = body.message;
+    } catch {}
+    throw new Error(message);
+  }
   return res.json();
 }
 
 async function fetchRecordForUuid(uuid) {
   const status = document.getElementById('apiStatus');
+  if (!cifViewerConfig.recordProxyUrl) {
+    status.textContent = 'Error: the viewer is missing its server configuration.';
+    return;
+  }
   status.textContent = 'Fetching...';
   try {
-    const token = typeof cifViewerConfig.token === 'string' ? cifViewerConfig.token : '';
-    currentApiRecord = await fetchAmcsdRecord(uuid, token);
+    currentApiRecord = await fetchAmcsdRecord(uuid);
     status.textContent = 'Fetched successfully.';
     if (currentCifData) renderData(currentCifData);
     else renderData({ blockName: '', tags: {}, loops: [], blocks: [] });

@@ -2,27 +2,28 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>CIF Viewer</title>
+<title>CIF Converter</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <h1>CIF Viewer</h1>
+  <h1>CIF Converter</h1>
 
   <div id="panel">
-    <p>Select a .cif file to read its data.</p>
-
-    <input type="file" id="fileInput" accept=".cif,text/plain">
-
     <div id="apiSection">
       <h3>AMCSD Record</h3>
       <div id="apiStatus"></div>
     </div>
 
     <div id="output">
-      <h3>AMC Header</h3>
+      <h3>CIF &rarr; AMC Header</h3>
+      <label class="drop-zone">
+        <input type="file" id="fileInput" accept=".cif,text/plain">
+        <span class="drop-zone-prompt">Drag &amp; drop a .cif file here, or <span class="drop-zone-link">choose a file</span></span>
+        <span class="drop-zone-file"></span>
+      </label>
+      <textarea id="amcHeaderOutput" readonly rows="1"></textarea>
       <button id="copyHeaderBtn">Copy</button>
       <button id="sendHeaderBtn" hidden>Send</button>
-      <textarea id="amcHeaderOutput" readonly rows="1"></textarea>
       <p id="crystalSystemDisplay"></p>
       <div id="sendHeaderStatus" hidden></div>
     </div>
@@ -37,8 +38,11 @@
 
     <div id="amcToCifSection">
       <h3>AMC &rarr; CIF</h3>
-      <p>Select a .amc file to convert it to CIF.</p>
-      <input type="file" id="amcFileInput" accept=".amc,text/plain">
+      <label class="drop-zone">
+        <input type="file" id="amcFileInput" accept=".amc,text/plain">
+        <span class="drop-zone-prompt">Drag &amp; drop a .amc file here, or <span class="drop-zone-link">choose a file</span></span>
+        <span class="drop-zone-file"></span>
+      </label>
       <div id="amcToCifStatus"></div>
       <button id="copyAmcToCifBtn">Copy</button>
       <button id="sendAmcToCifBtn" hidden>Send</button>
@@ -58,7 +62,6 @@
   </div>
 
   <script src="spacegroups.js"></script>
-  <script src="auth.js"></script>
   <script src="submit.js"></script>
   <script src="app.js"></script>
   <script src="amc2cif.js"></script>

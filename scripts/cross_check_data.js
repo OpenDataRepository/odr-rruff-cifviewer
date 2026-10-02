@@ -13,14 +13,15 @@ const OUT_CSV = 'C:/Users/natha/Downloads/cif_amc_data_mismatches.csv';
 
 const stub = `
 var document = { getElementById: () => ({ addEventListener(){}, value:'', textContent:'', style:{} }) };
-var window = { location: { search: '' }, AMCSD_AUTH_READY: null };
+var window = { location: { search: '' }, addEventListener(){} };
+function setupDropZone() {}
 var navigator = { clipboard: { writeText: () => Promise.resolve() } };
 `;
 
 const src = stub + '\n' +
   fs.readFileSync(path.join(REPO, 'spacegroups.js'), 'utf8') + '\n' +
   fs.readFileSync(path.join(REPO, 'amc2cif.js'), 'utf8') + '\n' +
-  fs.readFileSync(path.join(REPO, 'app.js'), 'utf8') + '\n' +
+  fs.readFileSync(path.join(REPO, 'app.js'), 'utf8').replace(/^function setupDropZone[\s\S]*?^}\r?\n/m, '') + '\n' +
   `this.__lib = { parseCIF, resolveSpaceGroup, getTag, stripUncertainty, parseAmcText, buildAtomTableRows, bisoToUiso, betaToU, computeReciprocalCellLengths };`;
 
 const ctx = {};

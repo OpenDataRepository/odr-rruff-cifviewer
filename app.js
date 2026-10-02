@@ -729,6 +729,62 @@ function renderData(data) {
   autoSizeTextarea(amcHeaderOutput);
 }
 
+// Dropping a file onto a .drop-zone feeds it through the zone's file input
+// and fires 'change', so drag-and-drop and "choose a file" share one handler.
+function setupDropZone(input) {
+  const zone = input.closest('.drop-zone');
+  const fileLabel = zone.querySelector('.drop-zone-file');
+  const allowedExts = input.accept.split(',').map(s => s.trim().toLowerCase()).filter(s => s.startsWith('.'));
+  if (input.accept.includes('text/plain')) allowedExts.push('.txt');
+
+  input.addEventListener('change', () => {
+    const file = input.files[0];
+    fileLabel.textContent = file ? file.name : '';
+    zone.classList.toggle('has-file', !!file);
+  });
+
+  let dragDepth = 0;
+  zone.addEventListener('dragenter', event => {
+    event.preventDefault();
+    dragDepth++;
+    zone.classList.add('dragover');
+  });
+  zone.addEventListener('dragover', event => {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'copy';
+  });
+  zone.addEventListener('dragleave', () => {
+    if (--dragDepth <= 0) {
+      dragDepth = 0;
+      zone.classList.remove('dragover');
+    }
+  });
+  zone.addEventListener('drop', event => {
+    event.preventDefault();
+    dragDepth = 0;
+    zone.classList.remove('dragover');
+    const file = event.dataTransfer.files[0];
+    if (!file) return;
+    const name = file.name.toLowerCase();
+    if (allowedExts.length && !allowedExts.some(ext => name.endsWith(ext))) {
+      fileLabel.textContent = `Not a ${allowedExts[0]} file: ${file.name}`;
+      zone.classList.remove('has-file');
+      return;
+    }
+    const transfer = new DataTransfer();
+    transfer.items.add(file);
+    input.files = transfer.files;
+    input.dispatchEvent(new Event('change'));
+  });
+}
+
+// A file dropped just outside a drop zone would otherwise make the browser
+// navigate away from the page to open it.
+window.addEventListener('dragover', event => event.preventDefault());
+window.addEventListener('drop', event => event.preventDefault());
+
+setupDropZone(document.getElementById('fileInput'));
+
 document.getElementById('fileInput').addEventListener('change', event => {
   const file = event.target.files[0];
   if (!file) return;
@@ -741,13 +797,9 @@ document.getElementById('fileInput').addEventListener('change', event => {
   reader.readAsText(file);
 });
 
-// auth.js (if present) logs in with .env credentials and sets
-// window.AMCSD_API_TOKEN asynchronously once ready.
-async function getApiToken() {
-  if (window.AMCSD_AUTH_READY) await window.AMCSD_AUTH_READY;
-  return typeof window.AMCSD_API_TOKEN === 'string' ? window.AMCSD_API_TOKEN : '';
-}
-
+// Records are fetched through server.js (/api/record/<uuid>), which logs in
+// with the .env credentials and calls the ODR API server-side. The browser
+// can't call the API directly: it answers the CORS preflight with 405.
 let lastApiRequestTime = 0;
 
 async function rateLimitedFetch(url, options) {
@@ -757,11 +809,20 @@ async function rateLimitedFetch(url, options) {
   return fetch(url, options);
 }
 
-async function fetchAmcsdRecord(uuid, token) {
-  const res = await rateLimitedFetch(`https://www.rruff.net/odr_rruff/api/v4/dataset/record/${uuid}`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  if (!res.ok) throw new Error(`Request failed: ${res.status} ${res.statusText}`);
+async function fetchAmcsdRecord(uuid) {
+  const res = await rateLimitedFetch(`api/record/${encodeURIComponent(uuid)}`);
+  if (!res.ok) {
+    let message = `Request failed: ${res.status} ${res.statusText}`;
+    try {
+      const body = await res.json();
+      if (body && body.message) message = body.message;
+    } catch {
+      // Not our server's JSON error - most likely the page isn't being served
+      // by server.js.
+      if (res.status === 404) message += ' - start the page with "node server.js"';
+    }
+    throw new Error(message);
+  }
   return res.json();
 }
 
@@ -769,8 +830,7 @@ async function fetchRecordForUuid(uuid) {
   const status = document.getElementById('apiStatus');
   status.textContent = 'Fetching...';
   try {
-    const token = await getApiToken();
-    currentApiRecord = await fetchAmcsdRecord(uuid, token);
+    currentApiRecord = await fetchAmcsdRecord(uuid);
     status.textContent = 'Fetched successfully.';
     if (currentCifData) renderData(currentCifData);
     else renderData({ blockName: '', tags: {}, loops: [], blocks: [] });
