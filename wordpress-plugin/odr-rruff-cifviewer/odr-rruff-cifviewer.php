@@ -305,7 +305,7 @@ function cif_viewer_shortcode() {
 	ob_start();
 	?>
 	<div class="cif-viewer-app">
-		<h1>CIF Viewer</h1>
+		<h1>CIF Converter</h1>
 
 		<div id="panel">
 			<div id="apiSection">
