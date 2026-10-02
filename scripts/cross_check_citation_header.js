@@ -15,7 +15,7 @@ const OUT_CSV = 'C:/Users/natha/Downloads/cif_amc_header_mismatches.csv';
 // so the whole (unmodified) file can just be evaluated as-is.
 const stub = `
 var document = { getElementById: () => ({ addEventListener(){}, value:'', textContent:'', style:{} }) };
-var window = { location: { search: '' }, AMCSD_AUTH_READY: null, addEventListener(){} };
+var window = { location: { search: '' }, addEventListener(){} };
 function setupDropZone() {}
 var navigator = { clipboard: { writeText: () => Promise.resolve() } };
 `;

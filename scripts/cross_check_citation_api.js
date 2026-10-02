@@ -27,7 +27,7 @@ const MIN_REQUEST_GAP_MS = 1100;
 
 const stub = `
 var document = { getElementById: () => ({ addEventListener(){}, value:'', textContent:'', style:{} }) };
-var window = { location: { search: '' }, AMCSD_AUTH_READY: null, addEventListener(){} };
+var window = { location: { search: '' }, addEventListener(){} };
 function setupDropZone() {}
 var navigator = { clipboard: { writeText: () => Promise.resolve() } };
 `;
@@ -85,8 +85,7 @@ let token = null;
 async function getToken() {
   if (token) return token;
   const env = readEnv();
-  const username = env.API_CLIENT_ID || env.username;
-  const password = env.API_CLIENT_SECRET || env.password;
+  const { username, password } = env;
   if (!username || !password) throw new Error('No credentials in .env');
   const res = await apiFetch(`${API_BASE}/token`, {
     method: 'POST',

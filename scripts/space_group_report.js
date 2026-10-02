@@ -25,7 +25,7 @@ const MAX_EXAMPLE_FILES = 10;
 
 const stub = `
 var document = { getElementById: () => ({ addEventListener(){}, value:'', textContent:'', style:{} }) };
-var window = { location: { search: '' }, AMCSD_AUTH_READY: null, addEventListener(){} };
+var window = { location: { search: '' }, addEventListener(){} };
 var navigator = { clipboard: { writeText: () => Promise.resolve() } };
 function setupDropZone() {}
 `;
