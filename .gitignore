@@ -5,3 +5,6 @@ wordpress-plugin/odr-rruff-cifviewer/vendor/
 wordpress-plugin/odr-rruff-cifviewer/composer.lock
 response.json
 scripts/amcsd_uuids.json
+data/Generators.csv
+data/SpaceGroups.csv
+data/SpaceGroupData.xlsx
