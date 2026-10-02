@@ -52,6 +52,7 @@
 
 .cif-viewer-app #copyHeaderBtn {
   display: block;
+  margin-top: 0.5rem;
 }
 
 .cif-viewer-app #apiSection label,

@@ -797,13 +797,9 @@ document.getElementById('fileInput').addEventListener('change', event => {
   reader.readAsText(file);
 });
 
-// auth.js (if present) logs in with .env credentials and sets
-// window.AMCSD_API_TOKEN asynchronously once ready.
-async function getApiToken() {
-  if (window.AMCSD_AUTH_READY) await window.AMCSD_AUTH_READY;
-  return typeof window.AMCSD_API_TOKEN === 'string' ? window.AMCSD_API_TOKEN : '';
-}
-
+// Records are fetched through server.js (/api/record/<uuid>), which logs in
+// with the .env credentials and calls the ODR API server-side. The browser
+// can't call the API directly: it answers the CORS preflight with 405.
 let lastApiRequestTime = 0;
 
 async function rateLimitedFetch(url, options) {
@@ -813,11 +809,20 @@ async function rateLimitedFetch(url, options) {
   return fetch(url, options);
 }
 
-async function fetchAmcsdRecord(uuid, token) {
-  const res = await rateLimitedFetch(`https://www.rruff.net/odr_rruff/api/v4/dataset/record/${uuid}`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  if (!res.ok) throw new Error(`Request failed: ${res.status} ${res.statusText}`);
+async function fetchAmcsdRecord(uuid) {
+  const res = await rateLimitedFetch(`api/record/${encodeURIComponent(uuid)}`);
+  if (!res.ok) {
+    let message = `Request failed: ${res.status} ${res.statusText}`;
+    try {
+      const body = await res.json();
+      if (body && body.message) message = body.message;
+    } catch {
+      // Not our server's JSON error - most likely the page isn't being served
+      // by server.js.
+      if (res.status === 404) message += ' - start the page with "node server.js"';
+    }
+    throw new Error(message);
+  }
   return res.json();
 }
 
@@ -825,8 +830,7 @@ async function fetchRecordForUuid(uuid) {
   const status = document.getElementById('apiStatus');
   status.textContent = 'Fetching...';
   try {
-    const token = await getApiToken();
-    currentApiRecord = await fetchAmcsdRecord(uuid, token);
+    currentApiRecord = await fetchAmcsdRecord(uuid);
     status.textContent = 'Fetched successfully.';
     if (currentCifData) renderData(currentCifData);
     else renderData({ blockName: '', tags: {}, loops: [], blocks: [] });

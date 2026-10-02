@@ -798,7 +798,9 @@ document.getElementById('fileInput').addEventListener('change', event => {
 });
 
 // odrRruffCifViewer is injected by odr-rruff-cifviewer.php via
-// wp_localize_script; the token is generated server-side so the API
+// wp_localize_script. Records are fetched through the plugin's own REST route,
+// which calls the ODR API server-side: the browser can't call the API directly
+// because it answers the CORS preflight with 405, and this way the token and
 // credentials never reach the browser.
 const cifViewerConfig = typeof window.odrRruffCifViewer === 'object' && window.odrRruffCifViewer ? window.odrRruffCifViewer : {};
 
@@ -811,38 +813,36 @@ async function rateLimitedFetch(url, options) {
   return fetch(url, options);
 }
 
-async function fetchAmcsdRecord(uuid, token) {
-  const res = await rateLimitedFetch(`${cifViewerConfig.recordUrl || 'https://www.rruff.net/odr_rruff/api/v4/dataset/record/'}${uuid}`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  if (!res.ok) throw new Error(`Request failed: ${res.status} ${res.statusText}`);
+async function fetchAmcsdRecord(uuid) {
+  // The nonce lets WordPress recognise a logged-in admin, so the route can
+  // include the detailed reason when something goes wrong.
+  const headers = cifViewerConfig.restNonce ? { 'X-WP-Nonce': cifViewerConfig.restNonce } : {};
+  const res = await rateLimitedFetch(`${cifViewerConfig.recordProxyUrl}${encodeURIComponent(uuid)}`, { headers, credentials: 'same-origin' });
+  if (!res.ok) {
+    let message = `Request failed: ${res.status} ${res.statusText}`;
+    try {
+      const body = await res.json();
+      if (body && body.message) message = body.message;
+    } catch {}
+    throw new Error(message);
+  }
   return res.json();
-}
-
-// tokenError / tokenSource are only sent to admins (see odr-rruff-cifviewer.php).
-function tokenProblemDetail() {
-  if (cifViewerConfig.tokenError) return ` Server said: ${cifViewerConfig.tokenError}`;
-  if (cifViewerConfig.tokenSource) return ` (token came from the ${cifViewerConfig.tokenSource})`;
-  return '';
 }
 
 async function fetchRecordForUuid(uuid) {
   const status = document.getElementById('apiStatus');
-  const token = typeof cifViewerConfig.token === 'string' ? cifViewerConfig.token : '';
-  if (!token) {
-    // Without a token the API just answers 403, so don't send the request.
-    status.textContent = `Error: the server could not get an API token.${tokenProblemDetail()}`;
+  if (!cifViewerConfig.recordProxyUrl) {
+    status.textContent = 'Error: the viewer is missing its server configuration.';
     return;
   }
   status.textContent = 'Fetching...';
   try {
-    currentApiRecord = await fetchAmcsdRecord(uuid, token);
+    currentApiRecord = await fetchAmcsdRecord(uuid);
     status.textContent = 'Fetched successfully.';
     if (currentCifData) renderData(currentCifData);
     else renderData({ blockName: '', tags: {}, loops: [], blocks: [] });
   } catch (err) {
-    const rejected = /: 40[13] /.test(err.message);
-    status.textContent = `Error: ${err.message}${rejected ? ` - the API rejected the token.${tokenProblemDetail()}` : ''}`;
+    status.textContent = `Error: ${err.message}`;
   }
 }
 
