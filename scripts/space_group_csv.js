@@ -1,14 +1,17 @@
 #!/usr/bin/env node
-// Convert the space group generator file (data/SpaceGroupData.txt) into three linked CSVs:
+// Convert the space group generator file (data/SpaceGroupData.txt) into four linked CSVs:
 //
 //   SpaceGroups.csv    one row per space group (one per line of the .txt)
-//                      GroupID, SpaceGroupName, Shift, Lattice, GenCount
+//                      GroupID, SpaceGroupName, Shift, Lattice, GenCount, OpCount
 //   Generators.csv     one row per generator, linked to its group by GroupID
 //                      GroupID, GenIndex, Order, Generator, GeneratorM, OrderM
+//   SymmetryOps.csv    one row per symmetry operation generated from them (see expandGenerators);
+//                      starred alternate-origin groups are skipped for now
+//                      GroupID, OpIndex, Operator, OperatorM
 //   SpaceGroupData.csv the two joined for reading: one row per space group with its
 //                      generators side by side (Gen1Order, Gen1, Gen1M, ... Gen3M)
 //
-// plus SpaceGroupData.xlsx, the same three tables as sheets, for opening in Excel. (Excel reads
+// plus SpaceGroupData.xlsx, the same four tables as sheets, for opening in Excel. (Excel reads
 // CSV cells starting with "-" such as "-x,y,z" as formulas and shows #NAME?; the .xlsx stores
 // them as text.)
 //
@@ -113,6 +116,88 @@ function format3x4(M) {
   return M.slice(0, 3).flat().map(formatFraction).join(' ');
 }
 
+const IDENTITY = generatorToMatrix('x,y,z');
+
+// Translation component taken into [0, 1) exactly, e.g. -1/4 -> 3/4, 1 -> 0.
+const fmod1 = ([n, d]) => frac(((n % d) + d) % d, d);
+
+// The same operator with its translations moved back into the unit cell.
+function reduceToCell(M) {
+  return M.map((row, i) => (i < 3 ? [...row.slice(0, 3), fmod1(row[3])] : row));
+}
+
+// Rotation part only, as a key: operators that differ just by a translation share it.
+const rotationKey = M => M.slice(0, 3).map(row => row.slice(0, 3).map(formatFraction).join(' ')).join(' ');
+
+// 4x4 matrix -> operator string in the .txt style, e.g. "1/2-x,y,-z" or "x-y,-y,1/2+z".
+function formatOperator(M) {
+  return M.slice(0, 3).map(row => {
+    let s = row[3][0] ? formatFraction(row[3]) : '';
+    row.slice(0, 3).forEach(([c], k) => {
+      if (!c) return;
+      const coef = Math.abs(c) === 1 ? '' : String(Math.abs(c));
+      s += (c < 0 ? '-' : s ? '+' : '') + coef + 'xyz'[k];
+    });
+    return s || '0';
+  }).join(',');
+}
+
+// Centring translations of each lattice letter (besides 0,0,0). R is centred only in the
+// hexagonal setting (:4); in the rhombohedral setting (:5) its cell is primitive.
+const CENTRING = {
+  P: [], A: [[0, 1, 1]], B: [[1, 0, 1]], C: [[1, 1, 0]], I: [[1, 1, 1]],
+  F: [[0, 1, 1], [1, 0, 1], [1, 1, 0]],
+}; // in halves
+const R_HEX_CENTRING = [[[2, 3], [1, 3], [1, 3]], [[1, 3], [2, 3], [2, 3]]];
+function centringVectors(lattice, setting) {
+  if (lattice === 'R') return setting === '5' ? [] : R_HEX_CENTRING;
+  return CENTRING[lattice].map(v => v.map(h => frac(h, 2)));
+}
+
+// All symmetry operations of a group from its generators, as in the Fortran
+// Get_all_symmetry_matrices_from_generators: the identity first, then every product
+// g3^i g2^j g1^k (i, j, k = 1..order) with translations moved into the cell. One operation is
+// kept per rotation part, so centring translations are left out (they come from the lattice
+// letter). The generators should give each rotation exactly once up to a centring translation,
+// so the count must equal the product of the orders; anything else is reported as an error.
+// A repeated rotation whose translation differs by a non-centring vector is passed to warn(), once per group.
+function expandGenerators(gens, lattice, setting, warn) {
+  const [g1, g2, g3] = [0, 1, 2].map(k => gens[k] || { order: 1, M: IDENTITY });
+  const expected = g1.order * g2.order * g3.order;
+  const centring = centringVectors(lattice, setting).map(v => v.map(formatFraction).join(' '));
+  const ops = new Map([[rotationKey(IDENTITY), IDENTITY]]);
+  let warned = false; // report only the first clash per group
+  let p3 = IDENTITY;
+  for (let i = 1; i <= g3.order; i++) {
+    p3 = matMul(g3.M, p3);
+    let p2 = IDENTITY;
+    for (let j = 1; j <= g2.order; j++) {
+      p2 = matMul(g2.M, p2);
+      let p1 = IDENTITY;
+      for (let k = 1; k <= g1.order; k++) {
+        p1 = matMul(g1.M, p1);
+        const op = reduceToCell(matMul(matMul(p3, p2), p1));
+        const key = rotationKey(op);
+        const prev = ops.get(key);
+        if (!prev) {
+          ops.set(key, op);
+          continue;
+        }
+        // Same rotation again: the translations may only differ by a centring vector.
+        const diff = [0, 1, 2].map(r => formatFraction(fmod1(fadd(op[r][3], [-prev[r][3][0], prev[r][3][1]])))).join(' ');
+        if (diff !== '0 0 0' && !centring.includes(diff) && !warned) {
+          warned = true;
+          warn(`${formatOperator(op)} and ${formatOperator(prev)} differ by ${diff}, not a ${lattice}-lattice translation`);
+        }
+      }
+    }
+  }
+  if (ops.size !== expected) {
+    throw new Error(`generators give ${ops.size} operations, but their orders multiply to ${expected}`);
+  }
+  return [...ops.values()];
+}
+
 function csvField(s) {
   s = String(s);
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
@@ -123,8 +208,10 @@ const SYMBOL_RE = /^(\*?)([^:\[\]]+)(?::(\d))?(?:\[([^\]]*)\])?$/;
 
 const groups = [];
 const generators = [];
+const symmetryOps = [];
 const lines = fs.readFileSync(input, 'utf8').split(/\r?\n/);
 const errors = [];
+const warnings = [];
 const seen = new Map();
 lines.forEach((line, i) => {
   if (!line.trim() || /^(Date|Note):/.test(line)) return;
@@ -168,21 +255,28 @@ lines.forEach((line, i) => {
     errors.push(`Line ${lineNo} (${symbol}): unexpected text "${rest.replace(/(\d+)\s+'([^']*)'/g, '').trim()}"`);
     return;
   }
-  let parsed;
+  let parsed, ops = [];
   try {
     parsed = gens.map(([, order, op]) => {
       const M = generatorToMatrix(op);
       const orderM = format3x4(matPow(M, Number(order)));
-      return { order: Number(order), op, matrix: format3x4(M), orderM };
+      return { order: Number(order), op, M, matrix: format3x4(M), orderM };
     });
+    // Starred (alternate-origin) groups aren't expanded for now; OpCount stays blank for them.
+    if (!star) ops = expandGenerators(parsed, lattice, setting, msg => warnings.push(`Line ${lineNo} (${symbol}): ${msg}`));
   } catch (e) {
     errors.push(`Line ${lineNo} (${symbol}): ${e.message}`);
     return;
   }
   const id = groups.length + 1;
-  groups.push({ id, symbol, origin, lattice, gens: parsed });
+  groups.push({ id, symbol, origin, lattice, gens: parsed, opCount: star ? '' : ops.length });
   parsed.forEach((g, k) => generators.push([id, k + 1, g.order, g.op, g.matrix, g.orderM]));
+  ops.forEach((M, k) => symmetryOps.push([id, k + 1, formatOperator(M), format3x4(M)]));
 });
+
+if (warnings.length) {
+  console.warn(`Warning: ${warnings.length} group(s) whose generators imply a centring their lattice letter lacks:\n${warnings.join('\n')}\n`);
+}
 
 if (errors.length) {
   console.error(errors.join('\n'));
@@ -196,8 +290,8 @@ function writeCsv(file, rows) {
   return path.resolve(out);
 }
 
-const groupCols = ['GroupID', 'SpaceGroupName', 'Shift', 'Lattice', 'GenCount'];
-const groupRow = g => [g.id, g.symbol, g.origin, g.lattice, g.gens.length];
+const groupCols = ['GroupID', 'SpaceGroupName', 'Shift', 'Lattice', 'GenCount', 'OpCount'];
+const groupRow = g => [g.id, g.symbol, g.origin, g.lattice, g.gens.length, g.opCount];
 const genCols = Array.from({ length: MAX_GENS }, (_, k) =>
   [`Gen${k + 1}Order`, `Gen${k + 1}`, `Gen${k + 1}M`]).flat();
 
@@ -211,6 +305,7 @@ const tables = {
   ],
   SpaceGroups: [groupCols, ...groups.map(groupRow)],
   Generators: [['GroupID', 'GenIndex', 'Order', 'Generator', 'GeneratorM', 'OrderM'], ...generators],
+  SymmetryOps: [['GroupID', 'OpIndex', 'Operator', 'OperatorM'], ...symmetryOps],
 };
 
 const written = Object.entries(tables).map(([name, rows]) => writeCsv(`${name}.csv`, rows));
@@ -224,4 +319,4 @@ try {
 }
 written.push(path.resolve(xlsxFile));
 const starred = groups.filter(g => g.origin).length;
-console.log(`${groups.length} space groups (${starred} alternate origins), ${generators.length} generators. Wrote:\n  ${written.join('\n  ')}`);
+console.log(`${groups.length} space groups (${starred} alternate origins), ${generators.length} generators, ${symmetryOps.length} symmetry operations. Wrote:\n  ${written.join('\n  ')}`);
