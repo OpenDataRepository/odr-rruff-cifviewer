@@ -5,8 +5,7 @@
 //                      GroupID, SpaceGroupName, Shift, Lattice, GenCount, OpCount
 //   Generators.csv     one row per generator, linked to its group by GroupID
 //                      GroupID, GenIndex, Order, Generator, GeneratorM, OrderM
-//   SymmetryOps.csv    one row per symmetry operation generated from them (see expandGenerators);
-//                      starred alternate-origin groups are skipped for now
+//   SymmetryOps.csv    one row per symmetry operation generated from them (see expandGenerators)
 //                      GroupID, OpIndex, Operator, OperatorM
 //   SpaceGroupData.csv the two joined for reading: one row per space group with its
 //                      generators side by side (Gen1Order, Gen1, Gen1M, ... Gen3M)
@@ -18,7 +17,8 @@
 // GroupID numbers the groups in .txt order, so the generators of one group stay together
 // however the rows are sorted or filtered. SpaceGroupName is the name exactly as written in the
 // .txt (e.g. "*P2_1:2[0,0,.25]"); Shift repeats its alternate-origin shift ("0,0,.25") for a
-// starred line and is blank for the default origin.
+// starred line and is blank for the default origin. A starred group's generators are written
+// for that origin; each is checked against its unstarred twin moved there (see shiftOrigin).
 // GeneratorM is the 3x4 augmented matrix written row by row (r11 r12 r13 t1 r21 ... t3),
 // 12 space-separated values. Translations stay as exact fractions (1/3 has no exact decimal).
 // OrderM is the generator applied Order times (g^Order), in the same 3x4 form. It should be the
@@ -124,6 +124,24 @@ const fmod1 = ([n, d]) => frac(((n % d) + d) % d, d);
 // The same operator with its translations moved back into the unit cell.
 function reduceToCell(M) {
   return M.map((row, i) => (i < 3 ? [...row.slice(0, 3), fmod1(row[3])] : row));
+}
+
+// The same operator written for an origin moved to p (in the old coordinates), as in Bob
+// Downs' "Transformations of Space Groups": {M|t} -> {M | t + Mp - p}.
+function shiftOrigin(M, p) {
+  return reduceToCell(M.map((row, i) => (i < 3
+    ? [...row.slice(0, 3), [0, 1, 2].reduce((t, k) => fadd(t, fmul(row[k], p[k])), fadd(row[3], [-p[i][0], p[i][1]]))]
+    : row)));
+}
+
+// One value of a starred line's shift, e.g. ".25", "-.125" or "-1/12", as an exact fraction.
+function parseShiftValue(s) {
+  const m = s.trim().match(/^([+-]?)(?:(\d+)\/(\d+)|(\d*)\.?(\d*))$/);
+  if (!m || !(m[2] || m[4] || m[5])) throw new Error(`Could not read shift value "${s}"`);
+  const sign = m[1] === '-' ? -1 : 1;
+  if (m[2]) return frac(sign * Number(m[2]), Number(m[3]));
+  const den = 10 ** m[5].length;
+  return frac(sign * Number((m[4] || '0') + m[5]), den);
 }
 
 // Rotation part only, as a key: operators that differ just by a translation share it.
@@ -267,16 +285,37 @@ lines.forEach((line, i) => {
       const orderM = format3x4(matPow(M, Number(order)));
       return { order: Number(order), op, M, matrix: format3x4(M), orderM };
     });
-    // Starred (alternate-origin) groups aren't expanded for now; OpCount stays blank for them.
-    if (!star) ops = expandGenerators(parsed, lattice, setting, msg => warnings.push(`Line ${lineNo} (${symbol}): ${msg}`));
+    ops = expandGenerators(parsed, lattice, setting, msg => warnings.push(`Line ${lineNo} (${symbol}): ${msg}`));
   } catch (e) {
     errors.push(`Line ${lineNo} (${symbol}): ${e.message}`);
     return;
   }
   const id = groups.length + 1;
-  groups.push({ id, symbol, origin, lattice, gens: parsed, opCount: star ? '' : ops.length });
+  const twin = star ? name + (setting ? `:${setting}` : '') : '';
+  groups.push({ id, lineNo, symbol, twin, origin, lattice, gens: parsed, ops, opCount: ops.length });
   parsed.forEach((g, k) => generators.push([id, k + 1, g.order, g.op, g.matrix, g.orderM]));
   ops.forEach((M, k) => symmetryOps.push([id, k + 1, formatOperator(M), format3x4(M)]));
+});
+
+// A starred group must be its unstarred twin moved to the shifted origin. A twin not in the
+// .txt yet can't be checked, so it is skipped.
+const bySymbol = new Map(groups.filter(g => !g.origin).map(g => [g.symbol, g]));
+groups.filter(g => g.origin && bySymbol.has(g.twin)).forEach(g => {
+  let p;
+  try {
+    p = g.origin.split(',').map(parseShiftValue);
+    if (p.length !== 3) throw new Error(`Expected 3 shift values in [${g.origin}]`);
+  } catch (e) {
+    errors.push(`Line ${g.lineNo} (${g.symbol}): ${e.message}`);
+    return;
+  }
+  const own = new Set(g.ops.map(formatOperator));
+  const shifted = bySymbol.get(g.twin).ops.map(M => formatOperator(shiftOrigin(M, p)));
+  const missing = shifted.find(op => !own.has(op));
+  if (missing || shifted.length !== own.size) {
+    errors.push(`Line ${g.lineNo} (${g.symbol}): not ${g.twin} moved to origin [${g.origin}]` +
+      (missing ? ` (that would include ${missing})` : ''));
+  }
 });
 
 if (warnings.length) {
