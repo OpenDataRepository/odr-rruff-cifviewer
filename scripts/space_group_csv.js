@@ -157,10 +157,12 @@ function centringVectors(lattice, setting) {
 // All symmetry operations of a group from its generators, as in the Fortran
 // Get_all_symmetry_matrices_from_generators: the identity first, then every product
 // g3^i g2^j g1^k (i, j, k = 1..order) with translations moved into the cell. One operation is
-// kept per rotation part, so centring translations are left out (they come from the lattice
-// letter). The generators should give each rotation exactly once up to a centring translation,
-// so the count must equal the product of the orders; anything else is reported as an error.
-// A repeated rotation whose translation differs by a non-centring vector is passed to warn(), once per group.
+// kept per rotation part. The generators should give each rotation exactly once up to a
+// centring translation, so that count must equal the product of the orders; anything else is
+// reported as an error. A repeated rotation whose translation differs by a non-centring vector
+// is passed to warn(), once per group.
+// The lattice letter's centring vectors are then added to every operation, so the result has
+// 2x the operations for A, B, C and I, 4x for F and 3x for R (hexagonal setting).
 function expandGenerators(gens, lattice, setting, warn) {
   const [g1, g2, g3] = [0, 1, 2].map(k => gens[k] || { order: 1, M: IDENTITY });
   const expected = g1.order * g2.order * g3.order;
@@ -195,7 +197,10 @@ function expandGenerators(gens, lattice, setting, warn) {
   if (ops.size !== expected) {
     throw new Error(`generators give ${ops.size} operations, but their orders multiply to ${expected}`);
   }
-  return [...ops.values()];
+  // Then the whole set again for each centring vector, added to the translation column.
+  const base = [...ops.values()];
+  return [...base, ...centringVectors(lattice, setting).flatMap(v =>
+    base.map(M => reduceToCell(M.map((row, r) => (r < 3 ? [...row.slice(0, 3), fadd(row[3], v[r])] : row)))))];
 }
 
 function csvField(s) {
