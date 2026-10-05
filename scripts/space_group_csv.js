@@ -6,7 +6,8 @@
 //   Generators.csv     one row per generator, linked to its group by GroupID
 //                      GroupID, GenIndex, Order, Generator, GeneratorM, OrderM
 //   SymmetryOps.csv    one row per symmetry operation generated from them (see expandGenerators)
-//                      GroupID, OpIndex, Operator, OperatorM
+//                      GroupID, OpIndex, Centring, Operator, OperatorM
+//                      (Centring: the lattice vector added, "0,0,0" for the generators' own)
 //   SpaceGroupData.csv the two joined for reading: one row per space group with its
 //                      generators side by side (Gen1Order, Gen1, Gen1M, ... Gen3M)
 //
@@ -180,7 +181,8 @@ function centringVectors(lattice, setting) {
 // reported as an error. A repeated rotation whose translation differs by a non-centring vector
 // is passed to warn(), once per group.
 // The lattice letter's centring vectors are then added to every operation, so the result has
-// 2x the operations for A, B, C and I, 4x for F and 3x for R (hexagonal setting).
+// 2x the operations for A, B, C and I, 4x for F and 3x for R (hexagonal setting). Each comes
+// back as { M, centring }, centring being the vector added ("0,0,0" for the generators' own).
 function expandGenerators(gens, lattice, setting, warn) {
   const [g1, g2, g3] = [0, 1, 2].map(k => gens[k] || { order: 1, M: IDENTITY });
   const expected = g1.order * g2.order * g3.order;
@@ -217,8 +219,10 @@ function expandGenerators(gens, lattice, setting, warn) {
   }
   // Then the whole set again for each centring vector, added to the translation column.
   const base = [...ops.values()];
-  return [...base, ...centringVectors(lattice, setting).flatMap(v =>
-    base.map(M => reduceToCell(M.map((row, r) => (r < 3 ? [...row.slice(0, 3), fadd(row[3], v[r])] : row)))))];
+  return [[frac(0), frac(0), frac(0)], ...centringVectors(lattice, setting)].flatMap(v => base.map(M => ({
+    M: reduceToCell(M.map((row, r) => (r < 3 ? [...row.slice(0, 3), fadd(row[3], v[r])] : row))),
+    centring: v.map(formatFraction).join(','),
+  })));
 }
 
 function csvField(s) {
@@ -294,7 +298,7 @@ lines.forEach((line, i) => {
   const twin = star ? name + (setting ? `:${setting}` : '') : '';
   groups.push({ id, lineNo, symbol, twin, origin, lattice, gens: parsed, ops, opCount: ops.length });
   parsed.forEach((g, k) => generators.push([id, k + 1, g.order, g.op, g.matrix, g.orderM]));
-  ops.forEach((M, k) => symmetryOps.push([id, k + 1, formatOperator(M), format3x4(M)]));
+  ops.forEach(({ M, centring }, k) => symmetryOps.push([id, k + 1, centring, formatOperator(M), format3x4(M)]));
 });
 
 // A starred group must be its unstarred twin moved to the shifted origin. A twin not in the
@@ -309,8 +313,8 @@ groups.filter(g => g.origin && bySymbol.has(g.twin)).forEach(g => {
     errors.push(`Line ${g.lineNo} (${g.symbol}): ${e.message}`);
     return;
   }
-  const own = new Set(g.ops.map(formatOperator));
-  const shifted = bySymbol.get(g.twin).ops.map(M => formatOperator(shiftOrigin(M, p)));
+  const own = new Set(g.ops.map(({ M }) => formatOperator(M)));
+  const shifted = bySymbol.get(g.twin).ops.map(({ M }) => formatOperator(shiftOrigin(M, p)));
   const missing = shifted.find(op => !own.has(op));
   if (missing || shifted.length !== own.size) {
     errors.push(`Line ${g.lineNo} (${g.symbol}): not ${g.twin} moved to origin [${g.origin}]` +
@@ -349,7 +353,7 @@ const tables = {
   ],
   SpaceGroups: [groupCols, ...groups.map(groupRow)],
   Generators: [['GroupID', 'GenIndex', 'Order', 'Generator', 'GeneratorM', 'OrderM'], ...generators],
-  SymmetryOps: [['GroupID', 'OpIndex', 'Operator', 'OperatorM'], ...symmetryOps],
+  SymmetryOps: [['GroupID', 'OpIndex', 'Centring', 'Operator', 'OperatorM'], ...symmetryOps],
 };
 
 const written = Object.entries(tables).map(([name, rows]) => writeCsv(`${name}.csv`, rows));
