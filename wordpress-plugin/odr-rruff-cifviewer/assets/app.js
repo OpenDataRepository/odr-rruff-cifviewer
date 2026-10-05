@@ -432,7 +432,8 @@ function buildAmcHeader(data, apiRecord, fileName) {
   const sg = resolveSpaceGroup(data);
   if (a && b && c && alpha && beta && gamma) {
     // Refinement uncertainty (the "(12)" in "19.840(12)") isn't wanted here.
-    const [a2, b2, c2, alpha2, beta2, gamma2] = [a, b, c, alpha, beta, gamma].map(stripUncertainty);
+    const [a2, b2, c2] = trimSharedZeros([a, b, c]);
+    const [alpha2, beta2, gamma2] = [alpha, beta, gamma].map(stripUncertainty);
     lines.push(`${a2} ${b2} ${c2} ${alpha2} ${beta2} ${gamma2} ${sg}`.trim());
   }
 
@@ -534,6 +535,112 @@ function formatAmcDecimal(rawValue) {
   return value.replace(/^(-?)0\./, '$1.');
 }
 
+// --- Precision (significant decimal places) ---
+// CIFs often pad every number to a fixed width ("0.07600", "0.50000", "5.43200"), so a
+// trailing zero may be padding or genuine precision - the CIF alone can't say which. The
+// rules below recover the intended precision from the values reported alongside instead;
+// they were checked against ~21,500 published AMC files. A value carrying a refinement
+// uncertainty, e.g. "0.7520(5)", is never touched: there, every digit shown is real.
+const PLAIN_DECIMAL_RE = /^(-?)(\d+)(?:\.(\d*))?$/;
+
+// Decimal places a value needs once trailing zeros are dropped ("0.07600" -> 3, "0.5000"
+// -> 1), or null when the rules don't apply to it: a placeholder, a value with an
+// uncertainty, anything other than a plain decimal, or zero (always written "0").
+function significantDecimals(rawValue) {
+  if (rawValue === undefined || isPlaceholderValue(rawValue) || /\(\d+\)/.test(rawValue)) return null;
+  const m = rawValue.trim().match(PLAIN_DECIMAL_RE);
+  if (!m || parseFloat(rawValue) === 0) return null;
+  return (m[3] || '').replace(/0+$/, '').length;
+}
+
+// The value written with `places` decimal places and no leading zero ("0.07600", 4 ->
+// ".0760"). Only trailing zeros are ever dropped or added, never a nonzero digit, so a
+// value with more significant decimals than `places` keeps all of them.
+function withDecimals(rawValue, places) {
+  const [, sign, intPart, decimals = ''] = rawValue.trim().match(PLAIN_DECIMAL_RE);
+  const digits = decimals.replace(/0+$/, '').padEnd(places, '0');
+  if (!digits) return `${sign}${intPart}`;
+  return `${sign}${intPart === '0' ? '' : intPart}.${digits}`;
+}
+
+// Places for a value given the values reported alongside it (the rest of its row): at
+// least as many as the least precise of them. Values in one row are normally reported to
+// similar precision, so "0.43700" next to "0.05521" and "0.83810" is .4370, not .437 - but
+// a row can legitimately mix 4 and 5 places (".1867 .19583 .2905"), which is why the floor
+// is the least precise neighbour rather than the most precise one.
+function placesAmongNeighbours(rawValue, neighbours) {
+  const others = neighbours.map(significantDecimals).filter(p => p !== null);
+  return Math.max(significantDecimals(rawValue), others.length ? Math.min(...others) : 0);
+}
+
+// Cell lengths padded with zeros ("5.43200 5.43200 10.12300") lose the zeros that a, b
+// and c all end with (-> 5.432 5.432 10.123). Only shared zeros go, and none are ever
+// added: a, b and c are often reported to different precision (8.306 8.52 6.043), so
+// one length ending in zero is no evidence of padding on its own. When all three are the
+// same number (a cubic cell) they're no evidence for each other either, so a single
+// trailing zero is kept (8.1010 is usually real) and only a run of two or more goes.
+function trimSharedZeros(rawValues) {
+  const decimals = rawValues.map(raw => (significantDecimals(raw) === null ? null : (raw.trim().match(PLAIN_DECIMAL_RE)[3] || '')));
+  if (decimals.some(d => d === null)) return rawValues.map(stripUncertainty);
+  let shared = Math.min(...decimals.map(d => d.length - d.replace(/0+$/, '').length));
+  const allSame = rawValues.every(raw => raw.trim() === rawValues[0].trim());
+  if (allSame && shared < 2) shared = 0;
+  return rawValues.map((raw, i) => withDecimals(raw, decimals[i].length - shared));
+}
+
+// Coordinates fixed by symmetry - multiples of 1/8 (0, .125, .25, .5, .75 ...) - are
+// written as short as possible rather than padded to their neighbours' precision.
+const isEighthMultiple = v => Math.abs(v * 8 - Math.round(v * 8)) < 1e-9;
+
+// Rewrites the precision of an atom table's cells in place (rows as built by
+// buildAtomTableRows; the raw* arrays hold the matching CIF strings, one entry per row):
+//  - x, y, z: a coordinate fixed by symmetry (a multiple of 1/8, or 1/3 / 2/3 in a
+//    hexagonal cell) stays short; any other gets at least as many places as the least
+//    precise of the other refined coordinates in its row (a lone .289 among 4-place values
+//    becomes .2890).
+//  - occ: trailing zeros dropped (.5000 -> .5); occupancies are mostly simple fractions.
+//  - Uiso/Biso: at least as many places as the column's median, so a column padded to
+//    "0.00840" comes out .0084, while a .065 among 4-place values stays .0650.
+//  - U(i,j): like coordinates, at least the least precise of the atom's other five terms.
+function applyPrecision(rows, rawCoords, rawOcc, rawIso, rawAniso, allowThirds) {
+  rawCoords.forEach((raws, i) => {
+    const refined = raws.map(raw => {
+      if (significantDecimals(raw) === null) return false;
+      const v = parseFloat(raw);
+      return !isEighthMultiple(v) && !(allowThirds && matchThirdFraction(v));
+    });
+    raws.forEach((raw, k) => {
+      if (!refined[k]) return;
+      const neighbours = raws.filter((_, kk) => kk !== k && refined[kk]);
+      rows[i][1 + k] = withDecimals(raw, placesAmongNeighbours(raw, neighbours));
+    });
+  });
+
+  if (rawOcc) {
+    rawOcc.forEach((raw, i) => {
+      if (rows[i][4] !== '' && significantDecimals(raw) !== null) rows[i][4] = withDecimals(raw, 0);
+    });
+  }
+
+  if (rawIso) {
+    const places = rawIso.map(significantDecimals).filter(p => p !== null).sort((a, b) => a - b);
+    const median = places.length ? places[Math.floor((places.length - 1) / 2)] : 0;
+    rawIso.forEach((raw, i) => {
+      const own = significantDecimals(raw);
+      if (own !== null) rows[i][5] = withDecimals(raw, Math.max(own, median));
+    });
+  }
+
+  if (rawAniso) {
+    rawAniso.forEach((raws, i) => {
+      raws.forEach((raw, j) => {
+        if (significantDecimals(raw) === null) return;
+        rows[i][6 + j] = withDecimals(raw, placesAmongNeighbours(raw, raws.filter((_, jj) => jj !== j)));
+      });
+    });
+  }
+}
+
 function isFullOccupancy(rawValue) {
   const parsed = parseFloat(stripUncertainty(rawValue));
   return Number.isFinite(parsed) && Math.abs(parsed - 1) < 1e-9;
@@ -620,6 +727,18 @@ function buildAtomTableRows(block) {
     while (cells.length < 12) cells.push('');
     return cells;
   });
+
+  applyPrecision(
+    rows,
+    atomLoop.rows.map(row => [row[xIdx], row[yIdx], row[zIdx]]),
+    occIdx !== -1 ? atomLoop.rows.map(row => row[occIdx]) : null,
+    isoIdx !== -1 ? atomLoop.rows.map(row => row[isoIdx]) : null,
+    anisoLoop ? atomLoop.rows.map(row => {
+      const anisoRow = anisoByLabel.get(row[labelIdx]);
+      return anisoColumnIdx.map(j => (anisoRow ? anisoRow[j] : undefined));
+    }) : null,
+    allowThirds,
+  );
 
   return { rows, isoLabel };
 }
@@ -926,7 +1045,7 @@ function parseCitationString(citation) {
   // Greedy title capture backtracks to the LAST ". " in the string, which is what
   // separates the title from "Journal Volume, Pages" even when the title itself
   // contains internal periods (e.g. "...carbonates. III. Crystal structures...")
-  const tailMatch = remainder.match(/^(.*)\.\s+([A-Za-z][A-Za-z .]*?)\s+([A-Za-z0-9]+),\s*(\d+(?:[-–]\d+)?)\s*$/);
+  const tailMatch = remainder.match(/^(.*)\.\s+([A-Za-z][A-Za-z .]*?)\s+([A-Za-z0-9]+(?:\([^)]*\))?),\s*(\d+(?:[-–]\d+)?)\s*$/);
   if (!tailMatch) return null;
 
   const titleRaw = tailMatch[1].trim();
