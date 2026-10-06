@@ -187,10 +187,124 @@ function expandGenerators(gens, lattice, setting, warn) {
 // Split a .txt symbol such as "*P2_1:2[0,0,.25]" into its star, name, setting and origin parts.
 const SYMBOL_RE = /^(\*?)([^:\[\]]+)(?::(\d))?(?:\[([^\]]*)\])?$/;
 
+// --- Looking groups up in the generator list ---
+// `table` maps each .txt symbol to its generators as [order, operator] pairs, as in
+// spacegroupdata.js. Only unstarred groups are looked up: a starred group is always built as
+// its unstarred (base) group moved to the origin p, {M|t} -> {M | t + Mp - p}.
+
+// Origin shifts and operator translations are multiples of 1/24 (halves, thirds, quarters,
+// sixths, eighths, twelfths), which also lets a rounded decimal such as .333333 count as 1/3.
+const STEPS = 24;
+
+// ".25", "-.333333", "0.5" or "2/3" as an exact multiple of 1/24, or null.
+function parseTwentyFourths(s) {
+  const [n, d = '1'] = String(s).split('/');
+  const steps = (Number(n) / Number(d)) * STEPS;
+  const k = Math.round(steps);
+  return Number.isFinite(steps) && Math.abs(steps - k) < 0.01 ? frac(k, STEPS) : null;
+}
+
+// An origin shift written as three values (".25 -.25 0", "0,0,2/3", "[.25,.25,0]"), or null.
+function parseOriginShift(text) {
+  const parts = String(text || '').replace(/[[\]]/g, '').trim().split(/[\s,]+/);
+  if (parts.length !== 3) return null;
+  const p = parts.map(parseTwentyFourths);
+  return p.includes(null) ? null : p;
+}
+
+// One shift value the way AMC files write it: a decimal with no leading zero (.25, -.125, 0),
+// rounded to six places for thirds and twelfths (.333333).
+function formatShiftValue([num, den]) {
+  if (num === 0) return '0';
+  return String(Number((num / den).toFixed(6))).replace(/^(-?)0\./, '$1.');
+}
+
+// The settings ('' for a group with none) the table has for an unstarred group name, e.g.
+// ['1', '2', '3'] for "P2_1/c" or [''] for "Pnma"; empty when the group isn't in the table.
+function groupSettings(table, name) {
+  if (table[name]) return [''];
+  return Object.keys(table).filter(k => k.startsWith(`${name}:`)).map(k => k.slice(name.length + 1));
+}
+
+// Which of `settings` a cell with angles alpha, beta, gamma (as written) is in. A monoclinic
+// group's unique axis is the one whose angle isn't 90 (":1" c, ":2" b, ":3" a); when all three
+// are 90, AMCSD writes the unique one with a decimal point ("90.0") and the others as "90". An
+// R group is hexagonal (":4") when gamma is 120, otherwise rhombohedral (":5").
+function settingFromCell({ alpha, beta, gamma }, settings) {
+  if (settings.length === 1) return settings[0];
+  const off90 = angle => Math.abs(parseFloat(angle) - 90) > 1e-3;
+  if (settings.includes('4') || settings.includes('5')) {
+    return Math.abs(parseFloat(gamma) - 120) < 1e-3 ? '4' : '5';
+  }
+  const angles = { 3: String(alpha), 2: String(beta), 1: String(gamma) };
+  const off = Object.keys(angles).filter(s => off90(angles[s]));
+  if (off.length === 1) return off[0];
+  const marked = Object.keys(angles).filter(s => angles[s].includes('.'));
+  return marked.length === 1 ? marked[0] : '2';
+}
+
+const operatorCache = new Map();
+
+// Every operation (matrices, identity first) of an unstarred group in the table.
+function groupOperators(table, name, setting) {
+  const symbol = setting ? `${name}:${setting}` : name;
+  if (!operatorCache.has(symbol)) {
+    const gens = table[symbol].map(([order, op]) => ({ order, M: generatorToMatrix(op) }));
+    operatorCache.set(symbol, expandGenerators(gens, name[0], setting, () => {}).map(({ M }) => M));
+  }
+  return operatorCache.get(symbol);
+}
+
+// Operator text as CIFs write it ("1/2-x,y,0.25+z", "X, Y, Z", "+x,-y,z") in this file's
+// form with translations in the cell, e.g. "1/2-x,y,1/4+z"; null if it can't be read.
+function normalizeOperator(text) {
+  const op = String(text).replace(/\s/g, '').toLowerCase()
+    .replace(/\d*\.\d+|\d+\.\d*/g, d => formatFraction(parseTwentyFourths(d) || [NaN, 1]));
+  try {
+    return formatOperator(reduceToCell(generatorToMatrix(op)));
+  } catch (e) {
+    return null;
+  }
+}
+
+// Every shift in (-1/2, 1/2] on the 1/24 grid, simplest first (fewest nonzero values, then
+// smallest), built once when first needed.
+let shiftCandidates = null;
+function allShifts() {
+  if (!shiftCandidates) {
+    const ks = [0];
+    for (let k = 1; k <= STEPS / 2; k++) ks.push(k, -k);
+    ks.pop(); // -12/24 is the same shift as 12/24
+    shiftCandidates = ks.flatMap(x => ks.flatMap(y => ks.map(z => [x, y, z])))
+      .map(v => ({ v, nonzero: v.filter(Boolean).length, size: v.reduce((s, k) => s + Math.abs(k), 0) }))
+      .sort((a, b) => a.nonzero - b.nonzero || a.size - b.size)
+      .map(({ v }) => v.map(k => frac(k, STEPS)));
+  }
+  return shiftCandidates;
+}
+
+// The origin shift p that moves the operations `base` onto exactly the operators `target` (a
+// Set of normalizeOperator strings), trying the shifts in `preferred` first, then every shift
+// on the 1/24 grid from the simplest; null if there is none.
+function findOriginShift(base, target, preferred = []) {
+  if (base.length !== target.size) return null;
+  const fits = p => base.every(M => target.has(formatOperator(shiftOrigin(M, p))));
+  return preferred.find(fits) || allShifts().find(fits) || null;
+}
+
+// The shifts the table's starred lines give for a group, e.g. [[1/4, -1/4, 0]] for
+// "*P4/ncc[.25,-.25,0]", so a match can be written the way the table writes it.
+function tableShifts(table, name, setting) {
+  const prefix = `*${setting ? `${name}:${setting}` : name}[`;
+  return Object.keys(table).filter(k => k.startsWith(prefix)).map(k => parseOriginShift(k.slice(prefix.length - 1))).filter(Boolean);
+}
+
 return {
   frac, fadd, fmul, fmod1, formatFraction, generatorToMatrix, matMul, matPow, format3x4,
   reduceToCell, shiftOrigin, parseShiftValue, formatOperator, centringVectors, expandGenerators,
   IDENTITY, SYMBOL_RE,
+  parseOriginShift, formatShiftValue, groupSettings, settingFromCell, groupOperators,
+  normalizeOperator, findOriginShift, tableShifts,
 };
 })();
 

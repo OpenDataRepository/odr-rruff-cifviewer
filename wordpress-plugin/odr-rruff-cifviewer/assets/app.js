@@ -382,6 +382,43 @@ function resolveSpaceGroup(data) {
   return '';
 }
 
+// The space group for the AMC cell line, checked against Downs' space group
+// list (SPACE_GROUP_GENERATORS, from spacegroupdata.js). When the CIF lists its
+// symmetry operators, they also say whether the structure is given with a
+// shifted origin: operators that match the group itself give the plain symbol;
+// operators that match it moved to an origin p ({M|t} -> {M | t + Mp - p})
+// give "*" plus the symbol, with p on the line after the cell parameters, as
+// AMCSD writes it. Returns { symbol, shiftLine } (shiftLine null when there is
+// no shift). Throws when the CIF has no space group, the group isn't in the
+// list, or the CIF's operators match it at no origin.
+function amcSpaceGroupFromCif(data, sg, cell) {
+  const S = SpaceGroupSymmetry;
+  if (!sg) throw new Error('The CIF has no space group.');
+  // A CIF origin-choice suffix ("Fd-3m:2") isn't part of the list's names.
+  const name = sg.replace(/:.*$/, '');
+  const settings = S.groupSettings(SPACE_GROUP_GENERATORS, name);
+  if (!settings.length) throw new Error(`Space group ${name} is not in the space group list.`);
+
+  const opsText = getLoopValues(data, '_space_group_symop_operation_xyz') || getLoopValues(data, '_symmetry_equiv_pos_as_xyz');
+  if (!opsText) return { symbol: sg, shiftLine: null };
+  const target = new Set(opsText.map(S.normalizeOperator));
+  if (target.has(null)) throw new Error("Could not read the CIF's symmetry operators.");
+
+  // The cell's own setting first, then any other setting the list has. No
+  // shift at all is tried first, then the list's own starred shifts for the
+  // group, so a match is written the way the list writes it.
+  const cellSetting = S.settingFromCell(cell, settings);
+  const zero = [S.frac(0), S.frac(0), S.frac(0)];
+  for (const setting of [cellSetting, ...settings.filter(s => s !== cellSetting)]) {
+    const base = S.groupOperators(SPACE_GROUP_GENERATORS, name, setting);
+    const p = S.findOriginShift(base, target, [zero, ...S.tableShifts(SPACE_GROUP_GENERATORS, name, setting)]);
+    if (!p) continue;
+    if (p.every(([num]) => num === 0)) return { symbol: sg, shiftLine: null };
+    return { symbol: `*${name}`, shiftLine: p.map(S.formatShiftValue).join(' ') };
+  }
+  throw new Error(`The CIF's symmetry operators don't match ${name} at any origin.`);
+}
+
 function buildAmcHeader(data, apiRecord, fileName) {
   const lines = [];
   lines.push(getMineralName(data, apiRecord, fileName));
@@ -434,7 +471,9 @@ function buildAmcHeader(data, apiRecord, fileName) {
     // Refinement uncertainty (the "(12)" in "19.840(12)") isn't wanted here.
     const [a2, b2, c2] = trimSharedZeros([a, b, c]);
     const [alpha2, beta2, gamma2] = [alpha, beta, gamma].map(stripUncertainty);
-    lines.push(`${a2} ${b2} ${c2} ${alpha2} ${beta2} ${gamma2} ${sg}`.trim());
+    const { symbol, shiftLine } = amcSpaceGroupFromCif(data, sg, { alpha: alpha2, beta: beta2, gamma: gamma2 });
+    lines.push(`${a2} ${b2} ${c2} ${alpha2} ${beta2} ${gamma2} ${symbol}`.trim());
+    if (shiftLine) lines.push(shiftLine);
   }
 
   // Word-wrap only the header lines built so far (mineral name, authors, journal,
@@ -844,7 +883,14 @@ function renderData(data) {
   document.getElementById('cellVolumeDisplay').textContent = currentCellVolume ? `Unit cell volume: ${currentCellVolume.toFixed(4)} Å³` : '';
 
   const amcHeaderOutput = document.getElementById('amcHeaderOutput');
-  amcHeaderOutput.value = buildAmcHeader(data, currentApiRecord, currentFileName);
+  const status = document.getElementById('cifToAmcStatus');
+  try {
+    amcHeaderOutput.value = buildAmcHeader(data, currentApiRecord, currentFileName);
+    status.textContent = '';
+  } catch (err) {
+    amcHeaderOutput.value = '';
+    status.textContent = `Error: ${err.message}`;
+  }
   autoSizeTextarea(amcHeaderOutput);
 }
 
