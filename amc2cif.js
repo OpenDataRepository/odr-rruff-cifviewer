@@ -143,7 +143,81 @@ function itNumberFromWyckoff(wyckoff) {
   return undefined;
 }
 
-const AMC_CELL_LINE_RE = /^(-?[\d.]+)\s+(-?[\d.]+)\s+(-?[\d.]+)\s+(-?[\d.]+)\s+(-?[\d.]+)\s+(-?[\d.]+)\s+(\S+)$/;
+// --- Symmetry operators ---
+// The CIF lists every symmetry operator of the space group, built from Downs'
+// generators (SPACE_GROUP_GENERATORS, from spacegroupdata.js) with symmetry.js,
+// centring translations included. The generator list tells settings apart
+// with a ":n" suffix that AMC files leave off, so the setting is read from the
+// cell instead: a monoclinic group's unique axis is the one whose angle isn't
+// 90 (":1" c, ":2" b, ":3" a; see amcSettingFromCell when all three are), and an R group is hexagonal (":4") when gamma
+// is 120, otherwise rhombohedral (":5").
+// A starred group ("*P4/ncc" with a shift line such as ".25 -.25 0") is given
+// with its origin moved to that shift p, so its operators are the unstarred
+// group's moved there: {M|t} -> {M | t + Mp - p}. That covers starred groups
+// the generator list doesn't have a line for yet.
+
+function amcSettingFromCell(cell, settings) {
+  const off90 = angle => Math.abs(parseFloat(angle) - 90) > 1e-3;
+  if (settings.includes('4') || settings.includes('5')) {
+    return Math.abs(parseFloat(cell.gamma) - 120) < 1e-3 ? '4' : '5';
+  }
+  const angles = { 3: cell.alpha, 2: cell.beta, 1: cell.gamma };
+  const off = Object.keys(angles).filter(s => off90(angles[s]));
+  if (off.length === 1) return off[0];
+  // All three angles 90: AMCSD writes the unique axis's angle with a decimal
+  // point ("90.0" or "90.") and the other two as plain "90".
+  const marked = Object.keys(angles).filter(s => angles[s].includes('.'));
+  return marked.length === 1 ? marked[0] : '2';
+}
+
+// The generator list's symbol for an AMC space group, with its setting ('' if
+// it has none), or null when the list doesn't have the group.
+function findAmcSpaceGroupSymbol(spaceGroup, cell) {
+  if (SPACE_GROUP_GENERATORS[spaceGroup]) return { symbol: spaceGroup, setting: '' };
+  const settings = Object.keys(SPACE_GROUP_GENERATORS)
+    .filter(k => k.startsWith(`${spaceGroup}:`))
+    .map(k => k.slice(spaceGroup.length + 1));
+  if (!settings.length) return null;
+  const setting = settings.length === 1 ? settings[0] : amcSettingFromCell(cell, settings);
+  return settings.includes(setting) ? { symbol: `${spaceGroup}:${setting}`, setting } : null;
+}
+
+// An AMC shift line (".25 -.25 0", ".3333333 0 0", "0 0 2/3") as exact
+// fractions. Shifts are always multiples of 1/24, so a rounded decimal such as
+// .333333 is taken as 1/3. null if the line doesn't hold three such values.
+function parseAmcOriginShift(text) {
+  const parts = (text || '').trim().split(/[\s,]+/);
+  if (parts.length !== 3) return null;
+  const p = parts.map(s => {
+    const [n, d = '1'] = s.split('/');
+    const k = Math.round((Number(n) / Number(d)) * 24);
+    return Number.isFinite(k) && Math.abs((Number(n) / Number(d)) * 24 - k) < 0.01 ? SpaceGroupSymmetry.frac(k, 24) : null;
+  });
+  return p.includes(null) ? null : p;
+}
+
+const amcSymmetryOperatorCache = new Map();
+
+// Every symmetry operator of a dataset's space group as "x,y,z"-style strings,
+// identity first, or null when they can't be built: a group (or setting) the
+// generator list doesn't have, or a starred group with no readable shift.
+function amcSymmetryOperators(cell, originShift) {
+  const found = findAmcSpaceGroupSymbol(cell.spaceGroup, cell);
+  if (!found) return null;
+  const p = cell.starred ? parseAmcOriginShift(originShift) : null;
+  if (cell.starred && !p) return null;
+  const { generatorToMatrix, expandGenerators, shiftOrigin, formatOperator, formatFraction } = SpaceGroupSymmetry;
+  const key = `${found.symbol}|${p ? p.map(formatFraction).join(',') : ''}`;
+  if (!amcSymmetryOperatorCache.has(key)) {
+    const gens = SPACE_GROUP_GENERATORS[found.symbol].map(([order, op]) => ({ order, M: generatorToMatrix(op) }));
+    const ops = expandGenerators(gens, found.symbol[0], found.setting, () => {})
+      .map(({ M }) => formatOperator(p ? shiftOrigin(M, p) : M));
+    amcSymmetryOperatorCache.set(key, ops);
+  }
+  return amcSymmetryOperatorCache.get(key);
+}
+
+const AMC_CELL_LINE_RE =/^(-?[\d.]+)\s+(-?[\d.]+)\s+(-?[\d.]+)\s+(-?[\d.]+)\s+(-?[\d.]+)\s+(-?[\d.]+)\s+(\S+)$/;
 
 function isAmcCellLine(line) {
   return AMC_CELL_LINE_RE.test(line.trim());
@@ -152,10 +226,11 @@ function isAmcCellLine(line) {
 function parseAmcCellLine(line) {
   const m = line.trim().match(AMC_CELL_LINE_RE);
   const [, a, b, c, alpha, beta, gamma, rawSpaceGroup] = m;
-  // AMCSD prefixes a "*" onto the space-group symbol for some origin-choice-2
-  // settings (e.g. "*Fd-3m", "*I4_1/a") - not part of the symbol itself.
+  // AMCSD prefixes a "*" onto the space-group symbol for a structure given with
+  // a shifted origin (e.g. "*Fd-3m", "*I4_1/a"), the shift itself on the next
+  // line - not part of the symbol itself, but kept as `starred`.
   const spaceGroup = rawSpaceGroup.replace(/^\*/, '');
-  return { a, b, c, alpha, beta, gamma, spaceGroup };
+  return { a, b, c, alpha, beta, gamma, spaceGroup, starred: rawSpaceGroup.startsWith('*') };
 }
 
 // Metric tensor G for cell parameters a, b, c, alpha, beta, gamma (angles in
@@ -488,6 +563,12 @@ function buildCifFromAmc(text) {
     const itNumber = itNumberFromWyckoff(dataset.cell.spaceGroup);
     if (itNumber) lines.push(`_space_group_IT_number ${itNumber}`);
     lines.push(`_symmetry_space_group_name_H-M '${wyckoffToHermannMauguin(dataset.cell.spaceGroup)}'`);
+    const symops = amcSymmetryOperators(dataset.cell, dataset.originShift);
+    if (symops) {
+      lines.push('loop_');
+      lines.push('_space_group_symop_operation_xyz');
+      for (const op of symops) lines.push(`  '${op}'`);
+    }
 
     lines.push('');
     lines.push(buildCifAtomLoops(dataset));

@@ -281,7 +281,9 @@ function cif_viewer_register_assets() {
 	wp_register_script( 'cif-viewer-spacegroups', CIF_VIEWER_URL . 'assets/spacegroups.js', array(), cif_viewer_asset_version( 'assets/spacegroups.js' ), true );
 	wp_register_script( 'cif-viewer-submit', CIF_VIEWER_URL . 'assets/submit.js', array(), cif_viewer_asset_version( 'assets/submit.js' ), true );
 	wp_register_script( 'cif-viewer-app', CIF_VIEWER_URL . 'assets/app.js', array( 'cif-viewer-spacegroups', 'cif-viewer-submit' ), cif_viewer_asset_version( 'assets/app.js' ), true );
-	wp_register_script( 'cif-viewer-amc2cif', CIF_VIEWER_URL . 'assets/amc2cif.js', array( 'cif-viewer-spacegroups' ), cif_viewer_asset_version( 'assets/amc2cif.js' ), true );
+	wp_register_script( 'cif-viewer-symmetry', CIF_VIEWER_URL . 'assets/symmetry.js', array(), cif_viewer_asset_version( 'assets/symmetry.js' ), true );
+	wp_register_script( 'cif-viewer-spacegroupdata', CIF_VIEWER_URL . 'assets/spacegroupdata.js', array(), cif_viewer_asset_version( 'assets/spacegroupdata.js' ), true );
+	wp_register_script( 'cif-viewer-amc2cif', CIF_VIEWER_URL . 'assets/amc2cif.js', array( 'cif-viewer-spacegroups', 'cif-viewer-symmetry', 'cif-viewer-spacegroupdata' ), cif_viewer_asset_version( 'assets/amc2cif.js' ), true );
 	wp_register_script( 'cif-viewer-amc2cif-ui', CIF_VIEWER_URL . 'assets/amc2cif-ui.js', array( 'cif-viewer-app', 'cif-viewer-amc2cif' ), cif_viewer_asset_version( 'assets/amc2cif-ui.js' ), true );
 }
 add_action( 'wp_enqueue_scripts', 'cif_viewer_register_assets' );
