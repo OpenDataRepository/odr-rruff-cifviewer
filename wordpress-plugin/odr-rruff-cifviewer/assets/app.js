@@ -388,8 +388,9 @@ function resolveSpaceGroup(data) {
 // shifted origin: operators that match the group itself give the plain symbol;
 // operators that match it moved to an origin p ({M|t} -> {M | t + Mp - p})
 // give "*" plus the symbol, with p on the line after the cell parameters, as
-// AMCSD writes it. Returns { symbol, shiftLine } (shiftLine null when there is
-// no shift). Throws when the CIF has no space group, the group isn't in the
+// AMCSD writes it. Returns { symbol, shiftLine, ops } (shiftLine null when
+// there is no shift; ops the group's operations at that origin, as 4x4
+// matrices, identity first). Throws when the CIF has no space group, the group isn't in the
 // list, or the CIF's operators match it at no origin.
 function amcSpaceGroupFromCif(data, sg, cell) {
   const S = SpaceGroupSymmetry;
@@ -400,21 +401,33 @@ function amcSpaceGroupFromCif(data, sg, cell) {
   if (!settings.length) throw new Error(`Space group ${name} is not in the space group list.`);
 
   const opsText = getLoopValues(data, '_space_group_symop_operation_xyz') || getLoopValues(data, '_symmetry_equiv_pos_as_xyz');
-  if (!opsText) return { symbol: sg, shiftLine: null };
+  const cellSetting = S.settingFromCell(cell, settings);
+  const cellIsClear = S.cellGivesSetting(cell, settings);
+  if ((cellIsClear || !opsText) && !settings.includes(cellSetting)) {
+    throw new Error(S.missingSettingMessage(name, cellSetting, settings));
+  }
+  if (!opsText) {
+    return { symbol: sg, shiftLine: null, ops: S.groupOperators(SPACE_GROUP_GENERATORS, name, cellSetting) };
+  }
   const target = new Set(opsText.map(S.normalizeOperator));
   if (target.has(null)) throw new Error("Could not read the CIF's symmetry operators.");
 
   // The cell's own setting first, then any other setting the list has. No
   // shift at all is tried first, then the list's own starred shifts for the
-  // group, so a match is written the way the list writes it.
-  const cellSetting = S.settingFromCell(cell, settings);
+  // group, so a match is written the way the list writes it. When the cell
+  // itself gives the setting (one angle not 90, or one written "90.0"), the
+  // operators have to be in that setting: a match in another one is an error.
   const zero = [S.frac(0), S.frac(0), S.frac(0)];
-  for (const setting of [cellSetting, ...settings.filter(s => s !== cellSetting)]) {
+  const order = settings.includes(cellSetting) ? [cellSetting, ...settings.filter(s => s !== cellSetting)] : settings;
+  for (const setting of order) {
     const base = S.groupOperators(SPACE_GROUP_GENERATORS, name, setting);
     const p = S.findOriginShift(base, target, [zero, ...S.tableShifts(SPACE_GROUP_GENERATORS, name, setting)]);
     if (!p) continue;
-    if (p.every(([num]) => num === 0)) return { symbol: sg, shiftLine: null };
-    return { symbol: `*${name}`, shiftLine: p.map(S.formatShiftValue).join(' ') };
+    if (cellIsClear && setting !== cellSetting) {
+      throw new Error(`The CIF's symmetry operators are for ${name}:${setting}, but its cell angles put it in :${cellSetting}.`);
+    }
+    if (p.every(([num]) => num === 0)) return { symbol: sg, shiftLine: null, ops: base };
+    return { symbol: `*${name}`, shiftLine: p.map(S.formatShiftValue).join(' '), ops: base.map(M => S.shiftOrigin(M, p)) };
   }
   throw new Error(`The CIF's symmetry operators don't match ${name} at any origin.`);
 }
@@ -782,6 +795,46 @@ function buildAtomTableRows(block) {
   return { rows, isoLabel };
 }
 
+// Every atom in the unit cell of each block that has its own _atom_site loop
+// (see unitcell.js), as [{ cell, atoms }]. A block's cell, space group and
+// symmetry operators are its own, or else those of the blocks without atoms
+// (such as a "data_global" block), never another structure's. The
+// operations are the space group list's, at the origin the CIF's operators
+// put it (see amcSpaceGroupFromCif), so the result is the same as for the
+// AMC file of the same structure (unitCellFromAmc).
+function unitCellFromCif(data) {
+  const shared = data.blocks.filter(block => !getAtomSiteLoop(block));
+  const sharedTags = Object.assign({}, ...shared.map(block => block.tags));
+  const sharedLoops = shared.flatMap(block => block.loops);
+  const results = data.blocks.filter(getAtomSiteLoop).map(block => {
+    const view = { tags: { ...sharedTags, ...block.tags }, loops: [...block.loops, ...sharedLoops] };
+    const raw = Object.fromEntries(['a', 'b', 'c', 'alpha', 'beta', 'gamma'].map(k => {
+      const value = getTag(view, `_cell_${k.length === 1 ? 'length' : 'angle'}_${k}`);
+      if (!value) throw new Error(`The CIF has no _cell_${k.length === 1 ? 'length' : 'angle'}_${k}.`);
+      return [k, stripUncertainty(value)];
+    }));
+    const cell = Object.fromEntries(Object.entries(raw).map(([k, v]) => [k, parseFloat(v)]));
+    const { ops } = amcSpaceGroupFromCif(view, resolveSpaceGroup(view), raw);
+
+    const loop = getAtomSiteLoop(block);
+    const col = tag => loop.tags.indexOf(tag);
+    const [labelIdx, xIdx, yIdx, zIdx, occIdx] = [...ATOM_SITE_TAGS, '_atom_site_occupancy'].map(col);
+    const number = value => parseFloat(stripUncertainty(value));
+    const atoms = loop.rows.map(row => ({
+      label: normalizeAtomLabel(row[labelIdx]),
+      x: number(row[xIdx]),
+      y: number(row[yIdx]),
+      z: number(row[zIdx]),
+      places: [xIdx, yIdx, zIdx].map(k => UnitCell.writtenPlaces(row[k])),
+      // A missing occupancy is a full one.
+      occ: occIdx !== -1 && !isPlaceholderValue(row[occIdx]) ? number(row[occIdx]) : 1,
+    }));
+    return { cell, atoms: UnitCell.expandAtoms(cell, ops, atoms) };
+  });
+  if (results.length === 0) throw new Error('No atom data found.');
+  return results;
+}
+
 // All 12 columns (atom, x, y, z, occ, Uiso, U(1,1)-U(2,3)) are shown.
 const VISIBLE_ATOM_COLUMNS = 12;
 
@@ -829,6 +882,36 @@ function buildAtomDatasetsOutput(data) {
     lines.push('END');
   }
   return lines.join('\n');
+}
+
+// Shows every atom in the unit cell, built from whichever file (CIF or AMC)
+// was loaded last by `build` (unitCellFromCif or unitCellFromAmc), under the
+// chemistry of the cell as CIF lines (formula, Z, volume, density; see
+// UnitCell.chemistry).
+function renderUnitCell(fileName, build) {
+  const output = document.getElementById('unitCellOutput');
+  const status = document.getElementById('unitCellStatus');
+  document.getElementById('unitCellSection').hidden = false;
+  try {
+    const datasets = build();
+    const unknown = new Set();
+    output.value = datasets.map(({ cell, atoms }, i) => {
+      const chem = UnitCell.chemistry(atoms, cell);
+      chem.unknown.forEach(label => unknown.add(label));
+      return [
+        ...(datasets.length > 1 ? [`Dataset ${i + 1}`] : []),
+        ...UnitCell.chemistryCifLines(chem).flat(),
+        '',
+        UnitCell.formatTable(atoms),
+      ].join('\n');
+    }).join('\n\n');
+    status.textContent = `From ${fileName}: ${datasets.map(({ atoms }) => atoms.length).join(' + ')} atoms in the cell`
+      + (unknown.size ? `. No element found for ${[...unknown].join(', ')}, so they're left out of the formula and there's no density.` : '');
+  } catch (err) {
+    output.value = '';
+    status.textContent = `Error: ${err.message}`;
+  }
+  autoSizeTextarea(output);
 }
 
 let currentCifData = null;
@@ -958,6 +1041,7 @@ document.getElementById('fileInput').addEventListener('change', event => {
   reader.onload = () => {
     currentCifData = parseCIF(reader.result);
     renderData(currentCifData);
+    renderUnitCell(file.name, () => unitCellFromCif(currentCifData));
   };
   reader.readAsText(file);
 });
@@ -1026,6 +1110,7 @@ function copyTextarea(id) {
 }
 
 document.getElementById('copyHeaderBtn').addEventListener('click', () => copyTextarea('amcHeaderOutput'));
+document.getElementById('copyUnitCellBtn').addEventListener('click', () => copyTextarea('unitCellOutput'));
 document.getElementById('copyCitationBtn').addEventListener('click', () => copyTextarea('citationOutput'));
 
 // Runs a submit.js call, showing "Sending..." then the result in `statusId` -

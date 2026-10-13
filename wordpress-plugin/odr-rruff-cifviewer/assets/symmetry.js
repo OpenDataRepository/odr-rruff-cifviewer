@@ -243,12 +243,35 @@ function settingFromCell({ alpha, beta, gamma }, settings) {
   return marked.length === 1 ? marked[0] : '2';
 }
 
+// Whether the cell itself says which of `settings` it's in, rather than
+// settingFromCell falling back to ":2": one angle off 90, or all three 90 with
+// exactly one written with a decimal point. A CIF's operators are supposed to
+// match that setting.
+function cellGivesSetting({ alpha, beta, gamma }, settings) {
+  if (settings.length === 1 || settings.includes('4') || settings.includes('5')) return true;
+  const angles = [alpha, beta, gamma].map(String);
+  const off = angles.filter(a => Math.abs(parseFloat(a) - 90) > 1e-3).length;
+  return off === 1 || (off === 0 && angles.filter(a => a.includes('.')).length === 1);
+}
+
+const UNIQUE_AXIS = { 1: 'c', 2: 'b', 3: 'a' };
+
+// The error for a cell whose setting the list doesn't have for a group, such
+// as "Pb" with beta not 90: a glide along b can't lie across the unique axis b,
+// so the symbol doesn't fit the cell (its operators are those of Pc).
+function missingSettingMessage(name, setting, settings) {
+  const axis = UNIQUE_AXIS[setting] ? ` (unique axis ${UNIQUE_AXIS[setting]})` : '';
+  return `The cell puts ${name} in setting :${setting}${axis}, which the space group list doesn't have`
+    + ` (it has ${settings.map(s => `:${s}`).join(', ')}); the space group symbol may not fit the cell.`;
+}
+
 const operatorCache = new Map();
 
 // Every operation (matrices, identity first) of an unstarred group in the table.
 function groupOperators(table, name, setting) {
   const symbol = setting ? `${name}:${setting}` : name;
   if (!operatorCache.has(symbol)) {
+    if (!table[symbol]) throw new Error(`Space group ${symbol} is not in the space group list.`);
     const gens = table[symbol].map(([order, op]) => ({ order, M: generatorToMatrix(op) }));
     operatorCache.set(symbol, expandGenerators(gens, name[0], setting, () => {}).map(({ M }) => M));
   }
@@ -303,7 +326,7 @@ return {
   frac, fadd, fmul, fmod1, formatFraction, generatorToMatrix, matMul, matPow, format3x4,
   reduceToCell, shiftOrigin, parseShiftValue, formatOperator, centringVectors, expandGenerators,
   IDENTITY, SYMBOL_RE,
-  parseOriginShift, formatShiftValue, groupSettings, settingFromCell, groupOperators,
+  parseOriginShift, formatShiftValue, groupSettings, settingFromCell, cellGivesSetting, missingSettingMessage, groupOperators,
   normalizeOperator, findOriginShift, tableShifts,
 };
 })();

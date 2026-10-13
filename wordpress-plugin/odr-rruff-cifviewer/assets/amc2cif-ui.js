@@ -18,6 +18,7 @@ document.getElementById('amcFileInput').addEventListener('change', event => {
       status.textContent = `Error: ${err.message}`;
     }
     autoSizeTextarea(output);
+    renderUnitCell(file.name, () => unitCellFromAmc(reader.result));
   };
   reader.readAsText(file);
 });
