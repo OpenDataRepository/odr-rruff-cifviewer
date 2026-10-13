@@ -4,70 +4,121 @@
 <meta charset="UTF-8">
 <title>CIF Converter</title>
 <link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="metrics.css">
 </head>
 <body>
-  <h1>CIF Converter</h1>
+  <nav class="page-nav"><button id="viewToggle" class="nav-button" type="button">CIF and AMC Metrics &rarr;</button></nav>
 
-  <div id="panel">
-    <div id="apiSection">
-      <h3>AMCSD Record</h3>
-      <div id="apiStatus"></div>
+  <div id="converterView">
+    <h1>CIF Converter</h1>
+
+    <div id="panel">
+      <div id="apiSection">
+        <h3>AMCSD Record</h3>
+        <div id="apiStatus"></div>
+      </div>
+
+      <div id="output">
+        <h3>CIF &rarr; AMC Header</h3>
+        <label class="drop-zone">
+          <input type="file" id="fileInput" accept=".cif,text/plain">
+          <span class="drop-zone-prompt">Drag &amp; drop a .cif file here, or <span class="drop-zone-link">choose a file</span></span>
+          <span class="drop-zone-file"></span>
+        </label>
+        <div id="cifToAmcStatus"></div>
+        <textarea id="amcHeaderOutput" readonly rows="1"></textarea>
+        <button id="copyHeaderBtn">Copy</button>
+        <button id="sendHeaderBtn" hidden>Send</button>
+        <p id="crystalSystemDisplay"></p>
+        <div id="sendHeaderStatus" hidden></div>
+      </div>
+
+      <div id="metricTensorSection" hidden>
+        <h3>G-Matrix</h3>
+        <div id="metricTensorOutput"></div>
+        <p id="cellVolumeDisplay"></p>
+        <button id="sendGMatrixBtn" hidden>Send</button>
+        <div id="sendGMatrixStatus" hidden></div>
+      </div>
+
+      <div id="amcToCifSection">
+        <h3>AMC &rarr; CIF</h3>
+        <label class="drop-zone">
+          <input type="file" id="amcFileInput" accept=".amc,text/plain">
+          <span class="drop-zone-prompt">Drag &amp; drop a .amc file here, or <span class="drop-zone-link">choose a file</span></span>
+          <span class="drop-zone-file"></span>
+        </label>
+        <div id="amcToCifStatus"></div>
+        <button id="copyAmcToCifBtn">Copy</button>
+        <button id="sendAmcToCifBtn" hidden>Send</button>
+        <textarea id="amcToCifOutput" readonly rows="1"></textarea>
+        <div id="sendAmcToCifStatus" hidden></div>
+      </div>
+
+      <div id="unitCellSection" hidden>
+        <h3>Unit Cell Atoms</h3>
+        <div id="unitCellStatus"></div>
+        <button id="copyUnitCellBtn">Copy</button>
+        <textarea id="unitCellOutput" readonly rows="1"></textarea>
+      </div>
+
+      <div id="citationSection">
+        <h3>Format Citation</h3>
+        <p>Paste a citation like: Authors (Year) Title. Journal Volume, Pages</p>
+        <textarea id="citationInput" rows="1"></textarea>
+        <button id="formatCitationBtn">Format</button>
+        <button id="copyCitationBtn">Copy</button>
+        <div id="citationStatus"></div>
+        <textarea id="citationOutput" readonly rows="1"></textarea>
+      </div>
+    </div>
+  </div>
+
+  <div id="metricsView" hidden>
+    <h1>CIF and AMC Metrics</h1>
+    <p id="metricsSource"></p>
+
+    <div id="metricsLoadPanel" hidden>
+      <p>No metrics data found. Generate it with</p>
+      <pre>node scripts/metrics.js path/to/amc path/to/cif &gt; data/metrics.json</pre>
+      <p>or choose the file:</p>
+      <input type="file" id="metricsFile" accept=".json">
     </div>
 
-    <div id="output">
-      <h3>CIF &rarr; AMC Header</h3>
-      <label class="drop-zone">
-        <input type="file" id="fileInput" accept=".cif,text/plain">
-        <span class="drop-zone-prompt">Drag &amp; drop a .cif file here, or <span class="drop-zone-link">choose a file</span></span>
-        <span class="drop-zone-file"></span>
-      </label>
-      <div id="cifToAmcStatus"></div>
-      <textarea id="amcHeaderOutput" readonly rows="1"></textarea>
-      <button id="copyHeaderBtn">Copy</button>
-      <button id="sendHeaderBtn" hidden>Send</button>
-      <p id="crystalSystemDisplay"></p>
-      <div id="sendHeaderStatus" hidden></div>
+    <div id="metricsSummary"></div>
+
+    <div id="metricsExplorer" hidden>
+      <h2>Explore the data</h2>
+      <div id="metricsControls">
+        <input type="search" id="metricsSearch" placeholder="Search name, id, formula, space group">
+        <select id="metricsFilter"></select>
+        <button id="metricsClearFilter" type="button">Show all</button>
+        <button id="metricsDownloadCsv" type="button">Download CSV</button>
+      </div>
+      <p id="metricsResultCount"></p>
+      <div id="metricsTableWrap"><table id="metricsTable"><thead></thead><tbody></tbody></table></div>
+      <div id="metricsPager">
+        <button id="metricsPrevPage" type="button">Previous</button>
+        <span id="metricsPageInfo"></span>
+        <button id="metricsNextPage" type="button">Next</button>
+      </div>
     </div>
 
-    <div id="metricTensorSection" hidden>
-      <h3>G-Matrix</h3>
-      <div id="metricTensorOutput"></div>
-      <p id="cellVolumeDisplay"></p>
-      <button id="sendGMatrixBtn" hidden>Send</button>
-      <div id="sendGMatrixStatus" hidden></div>
-    </div>
-
-    <div id="amcToCifSection">
-      <h3>AMC &rarr; CIF</h3>
-      <label class="drop-zone">
-        <input type="file" id="amcFileInput" accept=".amc,text/plain">
-        <span class="drop-zone-prompt">Drag &amp; drop a .amc file here, or <span class="drop-zone-link">choose a file</span></span>
-        <span class="drop-zone-file"></span>
-      </label>
-      <div id="amcToCifStatus"></div>
-      <button id="copyAmcToCifBtn">Copy</button>
-      <button id="sendAmcToCifBtn" hidden>Send</button>
-      <textarea id="amcToCifOutput" readonly rows="1"></textarea>
-      <div id="sendAmcToCifStatus" hidden></div>
-    </div>
-
-    <div id="citationSection">
-      <h3>Format Citation</h3>
-      <p>Paste a citation like: Authors (Year) Title. Journal Volume, Pages</p>
-      <textarea id="citationInput" rows="1"></textarea>
-      <button id="formatCitationBtn">Format</button>
-      <button id="copyCitationBtn">Copy</button>
-      <div id="citationStatus"></div>
-      <textarea id="citationOutput" readonly rows="1"></textarea>
-    </div>
+    <dialog id="metricsDetail">
+      <form method="dialog"><button class="close">Close</button></form>
+      <h3 id="metricsDetailTitle"></h3>
+      <table id="metricsDetailTable"></table>
+    </dialog>
   </div>
 
   <script src="spacegroups.js"></script>
   <script src="submit.js"></script>
   <script src="symmetry.js"></script>
   <script src="spacegroupdata.js"></script>
+  <script src="unitcell.js"></script>
   <script src="app.js"></script>
   <script src="amc2cif.js"></script>
   <script src="amc2cif-ui.js"></script>
+  <script src="metrics-page.js"></script>
 </body>
 </html>

@@ -7,3 +7,5 @@ response.json
 scripts/amcsd_uuids.json
 data/*.csv
 data/*.xlsx
+data/metrics.json
+wordpress-plugin/odr-rruff-cifviewer/data/metrics.json

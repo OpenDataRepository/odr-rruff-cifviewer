@@ -2,7 +2,7 @@
 /**
  * Plugin Name: ODR RRUFF CIF Viewer
  * Description: Reads a CIF and creates the AMC header
- * Version: 1.0.5
+ * Version: 1.0.6
  * Author: Nathan
  */
 
@@ -10,7 +10,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'CIF_VIEWER_VERSION', '1.0.5' );
+define( 'CIF_VIEWER_VERSION', '1.0.6' );
 define( 'CIF_VIEWER_URL', plugin_dir_url( __FILE__ ) );
 define( 'CIF_VIEWER_TOKEN_URL', 'https://www.rruff.net/odr_rruff/api/v4/token' );
 define( 'CIF_VIEWER_RECORD_URL', 'https://www.rruff.net/odr_rruff/api/v4/dataset/record/' );
@@ -282,85 +282,138 @@ function cif_viewer_register_assets() {
 	wp_register_script( 'cif-viewer-submit', CIF_VIEWER_URL . 'assets/submit.js', array(), cif_viewer_asset_version( 'assets/submit.js' ), true );
 	wp_register_script( 'cif-viewer-symmetry', CIF_VIEWER_URL . 'assets/symmetry.js', array(), cif_viewer_asset_version( 'assets/symmetry.js' ), true );
 	wp_register_script( 'cif-viewer-spacegroupdata', CIF_VIEWER_URL . 'assets/spacegroupdata.js', array(), cif_viewer_asset_version( 'assets/spacegroupdata.js' ), true );
-	wp_register_script( 'cif-viewer-app', CIF_VIEWER_URL . 'assets/app.js', array( 'cif-viewer-spacegroups', 'cif-viewer-submit', 'cif-viewer-symmetry', 'cif-viewer-spacegroupdata' ), cif_viewer_asset_version( 'assets/app.js' ), true );
-	wp_register_script( 'cif-viewer-amc2cif', CIF_VIEWER_URL . 'assets/amc2cif.js', array( 'cif-viewer-spacegroups', 'cif-viewer-symmetry', 'cif-viewer-spacegroupdata' ), cif_viewer_asset_version( 'assets/amc2cif.js' ), true );
+	wp_register_script( 'cif-viewer-unitcell', CIF_VIEWER_URL . 'assets/unitcell.js', array(), cif_viewer_asset_version( 'assets/unitcell.js' ), true );
+	wp_register_script( 'cif-viewer-app', CIF_VIEWER_URL . 'assets/app.js', array( 'cif-viewer-spacegroups', 'cif-viewer-submit', 'cif-viewer-symmetry', 'cif-viewer-spacegroupdata', 'cif-viewer-unitcell' ), cif_viewer_asset_version( 'assets/app.js' ), true );
+	wp_register_script( 'cif-viewer-amc2cif', CIF_VIEWER_URL . 'assets/amc2cif.js', array( 'cif-viewer-spacegroups', 'cif-viewer-symmetry', 'cif-viewer-spacegroupdata', 'cif-viewer-unitcell' ), cif_viewer_asset_version( 'assets/amc2cif.js' ), true );
 	wp_register_script( 'cif-viewer-amc2cif-ui', CIF_VIEWER_URL . 'assets/amc2cif-ui.js', array( 'cif-viewer-app', 'cif-viewer-amc2cif' ), cif_viewer_asset_version( 'assets/amc2cif-ui.js' ), true );
+	wp_register_style( 'cif-viewer-metrics', CIF_VIEWER_URL . 'assets/metrics.css', array( 'cif-viewer-style' ), cif_viewer_asset_version( 'assets/metrics.css' ) );
+	wp_register_script( 'cif-viewer-metrics', CIF_VIEWER_URL . 'assets/metrics-page.js', array( 'cif-viewer-app' ), cif_viewer_asset_version( 'assets/metrics-page.js' ), true );
 }
 add_action( 'wp_enqueue_scripts', 'cif_viewer_register_assets' );
 
 function cif_viewer_shortcode() {
 	wp_enqueue_style( 'cif-viewer-style' );
+	wp_enqueue_style( 'cif-viewer-metrics' );
 	wp_enqueue_script( 'cif-viewer-spacegroups' );
 	wp_enqueue_script( 'cif-viewer-submit' );
 	wp_enqueue_script( 'cif-viewer-app' );
 	wp_enqueue_script( 'cif-viewer-amc2cif' );
 	wp_enqueue_script( 'cif-viewer-amc2cif-ui' );
+	wp_enqueue_script( 'cif-viewer-metrics' );
 
 	// The token stays on the server: the browser fetches records through the
 	// plugin's REST route (see cif_viewer_rest_record) instead of the API.
 	$config = array(
 		'recordProxyUrl' => rest_url( 'odr-rruff-cifviewer/v1/record/' ),
 		'restNonce'      => wp_create_nonce( 'wp_rest' ),
+		// The metrics view's data (scripts/metrics.js), put in the plugin's data/ folder.
+		'metricsUrl'     => CIF_VIEWER_URL . 'data/metrics.json',
 	);
 	wp_localize_script( 'cif-viewer-app', 'odrRruffCifViewer', $config );
 
 	ob_start();
 	?>
 	<div class="cif-viewer-app">
-		<h1>CIF Converter</h1>
+		<div class="cif-viewer-nav"><button id="viewToggle" class="cif-viewer-btn" type="button">CIF and AMC Metrics &rarr;</button></div>
 
-		<div id="panel">
-			<div id="apiSection">
-				<h3>AMCSD Record</h3>
-				<div id="apiStatus"></div>
+		<div id="converterView">
+			<h1>CIF Converter</h1>
+
+			<div id="panel">
+				<div id="apiSection">
+					<h3>AMCSD Record</h3>
+					<div id="apiStatus"></div>
+				</div>
+
+				<div id="output">
+					<h3>CIF &rarr; AMC Header</h3>
+					<label class="drop-zone">
+					  <input type="file" id="fileInput" accept=".cif,text/plain">
+					  <span class="drop-zone-prompt">Drag &amp; drop a .cif file here, or <span class="drop-zone-link">choose a file</span></span>
+					  <span class="drop-zone-file"></span>
+					</label>
+					<div id="cifToAmcStatus"></div>
+					<textarea id="amcHeaderOutput" readonly rows="1"></textarea>
+					<button id="copyHeaderBtn" class="cif-viewer-btn" type="button">Copy</button>
+					<button id="sendHeaderBtn" hidden class="cif-viewer-btn" type="button">Send</button>
+					<p id="crystalSystemDisplay"></p>
+					<div id="sendHeaderStatus" hidden></div>
+				</div>
+
+				<div id="metricTensorSection" hidden>
+					<h3>G-Matrix</h3>
+					<div id="metricTensorOutput"></div>
+					<p id="cellVolumeDisplay"></p>
+					<button id="sendGMatrixBtn" hidden class="cif-viewer-btn" type="button">Send</button>
+					<div id="sendGMatrixStatus" hidden></div>
+				</div>
+
+				<div id="amcToCifSection">
+					<h3>AMC &rarr; CIF</h3>
+					<label class="drop-zone">
+					  <input type="file" id="amcFileInput" accept=".amc,text/plain">
+					  <span class="drop-zone-prompt">Drag &amp; drop a .amc file here, or <span class="drop-zone-link">choose a file</span></span>
+					  <span class="drop-zone-file"></span>
+					</label>
+					<div id="amcToCifStatus"></div>
+					<button id="copyAmcToCifBtn" class="cif-viewer-btn" type="button">Copy</button>
+					<button id="sendAmcToCifBtn" hidden class="cif-viewer-btn" type="button">Send</button>
+					<textarea id="amcToCifOutput" readonly rows="1"></textarea>
+					<div id="sendAmcToCifStatus" hidden></div>
+				</div>
+
+				<div id="unitCellSection" hidden>
+					<h3>Unit Cell Atoms</h3>
+					<div id="unitCellStatus"></div>
+					<button id="copyUnitCellBtn" class="cif-viewer-btn" type="button">Copy</button>
+					<textarea id="unitCellOutput" readonly rows="1"></textarea>
+				</div>
+
+				<div id="citationSection">
+					<h3>Format Citation</h3>
+					<p>Paste a citation like: Authors (Year) Title. Journal Volume, Pages</p>
+					<textarea id="citationInput" rows="1"></textarea>
+					<button id="formatCitationBtn" class="cif-viewer-btn" type="button">Format</button>
+					<button id="copyCitationBtn" class="cif-viewer-btn" type="button">Copy</button>
+					<div id="citationStatus"></div>
+					<textarea id="citationOutput" readonly rows="1"></textarea>
+				</div>
+			</div>
+		</div>
+
+		<div id="metricsView" hidden>
+			<h1>CIF and AMC Metrics</h1>
+			<p id="metricsSource"></p>
+
+			<div id="metricsLoadPanel" hidden>
+				<p>No metrics data found on the server. Choose the metrics.json file made by scripts/metrics.js:</p>
+				<input type="file" id="metricsFile" accept=".json">
 			</div>
 
-			<div id="output">
-				<h3>CIF &rarr; AMC Header</h3>
-				<label class="drop-zone">
-				  <input type="file" id="fileInput" accept=".cif,text/plain">
-				  <span class="drop-zone-prompt">Drag &amp; drop a .cif file here, or <span class="drop-zone-link">choose a file</span></span>
-				  <span class="drop-zone-file"></span>
-				</label>
-				<div id="cifToAmcStatus"></div>
-				<textarea id="amcHeaderOutput" readonly rows="1"></textarea>
-				<button id="copyHeaderBtn" class="cif-viewer-btn" type="button">Copy</button>
-				<button id="sendHeaderBtn" hidden class="cif-viewer-btn" type="button">Send</button>
-				<p id="crystalSystemDisplay"></p>
-				<div id="sendHeaderStatus" hidden></div>
+			<div id="metricsSummary"></div>
+
+			<div id="metricsExplorer" hidden>
+				<h2>Explore the data</h2>
+				<div id="metricsControls">
+					<input type="search" id="metricsSearch" placeholder="Search name, id, formula, space group">
+					<select id="metricsFilter"></select>
+					<button id="metricsClearFilter" class="cif-viewer-btn" type="button">Show all</button>
+					<button id="metricsDownloadCsv" class="cif-viewer-btn" type="button">Download CSV</button>
+				</div>
+				<p id="metricsResultCount"></p>
+				<div id="metricsTableWrap"><table id="metricsTable"><thead></thead><tbody></tbody></table></div>
+				<div id="metricsPager">
+					<button id="metricsPrevPage" class="cif-viewer-btn" type="button">Previous</button>
+					<span id="metricsPageInfo"></span>
+					<button id="metricsNextPage" class="cif-viewer-btn" type="button">Next</button>
+				</div>
 			</div>
 
-			<div id="metricTensorSection" hidden>
-				<h3>G-Matrix</h3>
-				<div id="metricTensorOutput"></div>
-				<p id="cellVolumeDisplay"></p>
-				<button id="sendGMatrixBtn" hidden class="cif-viewer-btn" type="button">Send</button>
-				<div id="sendGMatrixStatus" hidden></div>
-			</div>
-
-			<div id="amcToCifSection">
-				<h3>AMC &rarr; CIF</h3>
-				<label class="drop-zone">
-				  <input type="file" id="amcFileInput" accept=".amc,text/plain">
-				  <span class="drop-zone-prompt">Drag &amp; drop a .amc file here, or <span class="drop-zone-link">choose a file</span></span>
-				  <span class="drop-zone-file"></span>
-				</label>
-				<div id="amcToCifStatus"></div>
-				<button id="copyAmcToCifBtn" class="cif-viewer-btn" type="button">Copy</button>
-				<button id="sendAmcToCifBtn" hidden class="cif-viewer-btn" type="button">Send</button>
-				<textarea id="amcToCifOutput" readonly rows="1"></textarea>
-				<div id="sendAmcToCifStatus" hidden></div>
-			</div>
-
-			<div id="citationSection">
-				<h3>Format Citation</h3>
-				<p>Paste a citation like: Authors (Year) Title. Journal Volume, Pages</p>
-				<textarea id="citationInput" rows="1"></textarea>
-				<button id="formatCitationBtn" class="cif-viewer-btn" type="button">Format</button>
-				<button id="copyCitationBtn" class="cif-viewer-btn" type="button">Copy</button>
-				<div id="citationStatus"></div>
-				<textarea id="citationOutput" readonly rows="1"></textarea>
-			</div>
+			<dialog id="metricsDetail">
+				<form method="dialog"><button class="close cif-viewer-btn">Close</button></form>
+				<h3 id="metricsDetailTitle"></h3>
+				<table id="metricsDetailTable"></table>
+			</dialog>
 		</div>
 	</div>
 	<?php

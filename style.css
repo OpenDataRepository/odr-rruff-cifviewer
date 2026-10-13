@@ -19,6 +19,28 @@ h1 {
   text-align: center;
 }
 
+.page-nav {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.nav-button {
+  display: inline-block;
+  padding: 0.4rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-bg);
+  color: var(--fg);
+  font: inherit;
+  font-size: 0.95rem;
+  cursor: pointer;
+}
+
+.nav-button:hover {
+  border-color: #2b6cb0;
+  color: #2b6cb0;
+}
+
 #panel {
   background: var(--panel-bg);
   border-radius: 20px;

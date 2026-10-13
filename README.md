@@ -82,3 +82,26 @@ The **AMCSD Record** section should say "Fetched successfully."
 
 **Settings → CIF Viewer** has an "AMCSD API Token" field. It's only used when
 no credentials are found in `.env`. Normally leave it empty.
+
+## Metrics view
+
+The **CIF and AMC Metrics** button at the top of the converter switches the
+same page to a summary of the checks run across all of AMCSD: the chemical
+formula computed from the unit cell (whole numbers or not, common divisors,
+Z), how it compares with AMCSD's formula, volume and density, and whether the
+CIF and AMC files give the same unit cell. Each count filters the table under
+it, and any filtered list can be downloaded as CSV. Switching views doesn't
+change the URL, so the `?UUID=` stays and the WordPress shortcode keeps it in
+its own container.
+
+Generate the data from folders of AMC and CIF files (it takes several minutes):
+
+```bash
+node scripts/metrics.js path/to/amc path/to/cif > data/metrics.json
+```
+
+- **Standalone:** the page reads `data/metrics.json`.
+- **WordPress:** copy the file to the plugin's `data/metrics.json`
+  (`wp-content/plugins/odr-rruff-cifviewer/data/metrics.json`).
+
+The file isn't committed. Without it, the view asks you to choose it.
