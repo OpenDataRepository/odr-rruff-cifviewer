@@ -47,6 +47,43 @@ function sliceAtomRow(line, headerTokens) {
   return cells;
 }
 
+const AMC_NUMBER_RE = /^[+-]?(\d+\.?\d*|\.\d+)(\/\d+)?$/;
+
+// Two values written with no space between them (".00295.007955",
+// ".0032-.0011"), split at a column edge: the edge falls where the second
+// one's sign starts, or its point when the first already has one (so "0.5"
+// isn't taken for "0" and ".5").
+function isRunTogether(token, edge) {
+  const left = token.text.slice(0, edge - token.start), right = token.text.slice(edge - token.start);
+  return (right.startsWith('-') || (right.startsWith('.') && left.includes('.')))
+    && AMC_NUMBER_RE.test(left) && AMC_NUMBER_RE.test(right);
+}
+
+// One raw string per header column. Rows are normally sliced at the header's
+// column edges (sliceAtomRow), but some files have values running a
+// character past an edge (Curite's ".004" under "z" would be cut to ".00").
+// So a row where an edge cuts through a value (other than two values run
+// together) has each value put in the first column whose edge it doesn't
+// overrun by more than one character, keeping their order; any other row is
+// sliced.
+function readAtomRow(line, headerTokens) {
+  const tokens = tokenizeWithOffsets(line);
+  const edges = headerTokens.slice(1, -1).map(t => t.end);
+  const cut = tokens.slice(1).some(t => edges.some(e => t.start < e && e < t.end && !isRunTogether(t, e)));
+  if (!cut || tokens.length > headerTokens.length) return sliceAtomRow(line, headerTokens);
+  const cells = [tokens[0].text, ...headerTokens.slice(1).map(() => '')];
+  let col = 0;
+  tokens.slice(1).forEach((t, i, rest) => {
+    // Leave a column for each value still to come.
+    const last = headerTokens.length - (rest.length - i);
+    let best = col + 1;
+    while (best < last && headerTokens[best].end < t.end - 1) best++;
+    cells[best] = t.text;
+    col = best;
+  });
+  return cells;
+}
+
 const AMC_THIRD_FRACTIONS = {
   '1/3': '0.33333',
   '-1/3': '-0.33333',
@@ -70,6 +107,9 @@ function cifCoordFromAmc(value) {
 function cifDecimalFromAmc(value) {
   if (value === undefined || value === '') return '';
   if (value === '0') return '0';
+  // AMC writes some occupancies as fractions ("1/3", "1/12"), which a CIF
+  // number can't be.
+  if (value.includes('/')) return String(Number(amcNumber(value).toFixed(5)));
   if (value.startsWith('-.')) return `-0.${value.slice(2)}`;
   if (value.startsWith('.')) return `0${value}`;
   return value;
@@ -143,6 +183,77 @@ function itNumberFromWyckoff(wyckoff) {
   return undefined;
 }
 
+// --- Symmetry operators ---
+// The CIF lists every symmetry operator of the space group, built from Downs'
+// generators (SPACE_GROUP_GENERATORS, from spacegroupdata.js) with symmetry.js,
+// centring translations included. The generator list tells settings apart
+// with a ":n" suffix that AMC files leave off, so the setting is read from the
+// cell (see SpaceGroupSymmetry.settingFromCell).
+// A starred group ("*P4/ncc" with a shift line such as ".25 -.25 0") is given
+// with its origin moved to that shift p, so its operators are its base
+// (unstarred) group's moved there: {M|t} -> {M | t + Mp - p}. It needs only
+// the base group in the list, not a starred line of its own.
+
+// Every symmetry operation of a dataset's space group as 4x4 matrices,
+// identity first. Throws when they can't be built: the group (or, for a
+// starred one, its base group) isn't in the list, or a starred group has no
+// shift p on the line after the cell parameters.
+function amcSymmetryMatrices(cell, originShift) {
+  const { groupSettings, settingFromCell, missingSettingMessage, groupOperators, parseOriginShift, shiftOrigin } = SpaceGroupSymmetry;
+  const name = cell.spaceGroup;
+  const label = cell.starred ? `*${name}` : name;
+  const settings = groupSettings(SPACE_GROUP_GENERATORS, name);
+  if (!settings.length) {
+    throw new Error(cell.starred
+      ? `${label}: its base space group ${name} is not in the space group list.`
+      : `Space group ${name} is not in the space group list.`);
+  }
+  const p = cell.starred ? parseOriginShift(originShift) : null;
+  if (cell.starred && !p) {
+    throw new Error(`${label} has no origin shift p (three values on the line after the cell parameters).`);
+  }
+  const setting = settingFromCell(cell, settings);
+  if (!settings.includes(setting)) throw new Error(missingSettingMessage(label, setting, settings));
+  const ops = groupOperators(SPACE_GROUP_GENERATORS, name, setting);
+  return p ? ops.map(M => shiftOrigin(M, p)) : ops;
+}
+
+// The same operations as "x,y,z"-style strings.
+function amcSymmetryOperators(cell, originShift) {
+  return amcSymmetryMatrices(cell, originShift).map(SpaceGroupSymmetry.formatOperator);
+}
+
+// AMC coordinate text (".25", "-.125", "1/3", "1.5/36") as a number.
+function amcNumber(value) {
+  const m = String(value).match(/^(-?)(\d*\.?\d+)\/(\d+)$/);
+  return m ? (m[1] ? -1 : 1) * Number(m[2]) / Number(m[3]) : parseFloat(value);
+}
+
+// Every atom in the unit cell of each dataset (see unitcell.js), as
+// [{ cell, atoms }], atoms as UnitCell.expandAtoms gives them.
+function unitCellFromAmc(text) {
+  const { datasets } = parseAmcText(text);
+  if (datasets.length === 0) throw new Error('No atom data found.');
+  return datasets.map(unitCellOfDataset);
+}
+
+// One dataset's unit cell, { cell, atoms }.
+function unitCellOfDataset(dataset) {
+  const cell = Object.fromEntries(['a', 'b', 'c', 'alpha', 'beta', 'gamma'].map(k => [k, parseFloat(dataset.cell[k])]));
+  const col = name => dataset.columns.indexOf(name);
+  const [xIdx, yIdx, zIdx, occIdx] = ['fract_x', 'fract_y', 'fract_z', 'occupancy'].map(col);
+  const atoms = dataset.rows.map(row => ({
+    label: row.label,
+    x: amcNumber(row.values[xIdx]),
+    y: amcNumber(row.values[yIdx]),
+    z: amcNumber(row.values[zIdx]),
+    places: [xIdx, yIdx, zIdx].map(i => UnitCell.writtenPlaces(row.values[i])),
+    // A blank occupancy is a full one.
+    occ: occIdx !== -1 && row.values[occIdx] ? amcNumber(row.values[occIdx]) : 1,
+  }));
+  return { cell, atoms: UnitCell.expandAtoms(cell, amcSymmetryMatrices(dataset.cell, dataset.originShift), atoms) };
+}
+
 const AMC_CELL_LINE_RE = /^(-?[\d.]+)\s+(-?[\d.]+)\s+(-?[\d.]+)\s+(-?[\d.]+)\s+(-?[\d.]+)\s+(-?[\d.]+)\s+(\S+)$/;
 
 function isAmcCellLine(line) {
@@ -152,10 +263,11 @@ function isAmcCellLine(line) {
 function parseAmcCellLine(line) {
   const m = line.trim().match(AMC_CELL_LINE_RE);
   const [, a, b, c, alpha, beta, gamma, rawSpaceGroup] = m;
-  // AMCSD prefixes a "*" onto the space-group symbol for some origin-choice-2
-  // settings (e.g. "*Fd-3m", "*I4_1/a") - not part of the symbol itself.
+  // AMCSD prefixes a "*" onto the space-group symbol for a structure given with
+  // a shifted origin (e.g. "*Fd-3m", "*I4_1/a"), the shift itself on the next
+  // line - not part of the symbol itself, but kept as `starred`.
   const spaceGroup = rawSpaceGroup.replace(/^\*/, '');
-  return { a, b, c, alpha, beta, gamma, spaceGroup };
+  return { a, b, c, alpha, beta, gamma, spaceGroup, starred: rawSpaceGroup.startsWith('*') };
 }
 
 // Metric tensor G for cell parameters a, b, c, alpha, beta, gamma (angles in
@@ -292,10 +404,20 @@ const AMC_ATOM_COLUMN_MAP = {
   'B(1,2)': 'B12', 'B(1,3)': 'B13', 'B(2,3)': 'B23',
 };
 
+// A few files have a tab among a row's spaces; columns are read by character
+// position, so a tab is taken as reaching the next multiple of 8, as a text
+// editor shows it.
+function expandTabs(line) {
+  return line.replace(/[^\t]*\t/g, run => {
+    const before = run.slice(0, -1);
+    return before + ' '.repeat(8 - (before.length % 8));
+  });
+}
+
 // Parses one dataset's atom table (the header row plus every following row up
 // to a blank line, "END", the next cell-parameter line, or end of input).
 function parseAmcAtomTable(lines, startIndex) {
-  const headerLine = lines[startIndex];
+  const headerLine = lines[startIndex] === undefined ? undefined : expandTabs(lines[startIndex]);
   if (headerLine === undefined) return { columns: [], rows: [], nextIndex: startIndex };
   const headerTokens = tokenizeWithOffsets(headerLine);
   const columns = headerTokens.slice(1).map(t => AMC_ATOM_COLUMN_MAP[t.text] || t.text);
@@ -303,10 +425,10 @@ function parseAmcAtomTable(lines, startIndex) {
   const rows = [];
   let i = startIndex + 1;
   while (i < lines.length) {
-    const line = lines[i];
+    const line = expandTabs(lines[i]);
     const trimmed = line.trim();
     if (trimmed === '' || /^END$/i.test(trimmed) || isAmcCellLine(line)) break;
-    const cells = sliceAtomRow(line, headerTokens);
+    const cells = readAtomRow(line, headerTokens);
     rows.push({ label: cells[0], values: cells.slice(1) });
     i++;
   }
@@ -478,16 +600,34 @@ function buildCifFromAmc(text) {
       lines.push('');
       lines.push(`data_${header.amcsd || 'AMCSD'}_${idx + 1}`);
     }
+    // The chemistry of the unit cell (UnitCell.chemistry): formula and Z go
+    // above the cell lengths, volume and density below the angles. A dataset
+    // whose unit cell can't be built (an unreadable coordinate) gets only the
+    // volume, which needs just the cell.
+    let chemistryLines;
+    try {
+      const { cell, atoms } = unitCellOfDataset(dataset);
+      chemistryLines = UnitCell.chemistryCifLines(UnitCell.chemistry(atoms, cell));
+    } catch (err) {
+      const { a, b, c, alpha, beta, gamma } = dataset.cell;
+      const volume = computeCellVolume(...[a, b, c, alpha, beta, gamma].map(parseFloat));
+      chemistryLines = [[], [`_cell_volume ${volume.toFixed(3)}`]];
+    }
+    lines.push(...chemistryLines[0]);
     lines.push(`_cell_length_a ${dataset.cell.a}`);
     lines.push(`_cell_length_b ${dataset.cell.b}`);
     lines.push(`_cell_length_c ${dataset.cell.c}`);
     lines.push(`_cell_angle_alpha ${dataset.cell.alpha}`);
     lines.push(`_cell_angle_beta ${dataset.cell.beta}`);
     lines.push(`_cell_angle_gamma ${dataset.cell.gamma}`);
+    lines.push(...chemistryLines[1]);
 
     const itNumber = itNumberFromWyckoff(dataset.cell.spaceGroup);
     if (itNumber) lines.push(`_space_group_IT_number ${itNumber}`);
     lines.push(`_symmetry_space_group_name_H-M '${wyckoffToHermannMauguin(dataset.cell.spaceGroup)}'`);
+    lines.push('loop_');
+    lines.push('_space_group_symop_operation_xyz');
+    for (const op of amcSymmetryOperators(dataset.cell, dataset.originShift)) lines.push(`  '${op}'`);
 
     lines.push('');
     lines.push(buildCifAtomLoops(dataset));
