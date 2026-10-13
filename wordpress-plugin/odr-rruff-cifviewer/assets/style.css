@@ -15,6 +15,14 @@
   text-align: center;
 }
 
+.cif-viewer-app .cif-viewer-nav {
+  /* Padding, not margin: a margin here can collapse into the container's or be reset by
+     the theme, leaving the button against the site header. */
+  display: flex !important;
+  justify-content: flex-end !important;
+  padding-top: 1.5rem !important;
+}
+
 .cif-viewer-app #panel {
   background: var(--cifv-panel-bg);
   border-radius: 20px;

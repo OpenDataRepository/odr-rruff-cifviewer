@@ -1,0 +1,210 @@
+/* The metrics view. Everything is under #metricsView so it can sit inside a WordPress theme;
+   the colours come from the standalone page's variables or the plugin's (--cifv-*). */
+#metricsView {
+  --m-bg: var(--cifv-bg, var(--bg, #ffffff));
+  --m-panel-bg: var(--cifv-panel-bg, var(--panel-bg, #fafafa));
+  --m-border: var(--cifv-border, var(--border, #cccccc));
+  --m-muted: #555555;
+  --m-accent: #2b6cb0;
+}
+
+#metricsView h1 {
+  text-align: center;
+}
+
+#metricsSource {
+  text-align: center;
+  color: var(--m-muted);
+  font-size: 0.9rem;
+}
+
+#metricsView .group {
+  background: var(--m-panel-bg);
+  border-radius: 20px;
+  padding: 1rem 1.5rem 1.25rem;
+  margin-bottom: 1rem;
+}
+
+#metricsView .group h2 {
+  font-size: 1.1rem;
+  margin: 0.25rem 0;
+}
+
+#metricsView .group > p {
+  margin: 0 0 0.75rem;
+  color: var(--m-muted);
+  font-size: 0.9rem;
+}
+
+#metricsView .cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 0.6rem;
+}
+
+#metricsView .card {
+  text-align: left;
+  background: var(--m-bg);
+  border: 1px solid var(--m-border);
+  border-radius: 10px;
+  padding: 0.6rem 0.8rem;
+  margin: 0;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+}
+
+#metricsView .card:hover,
+#metricsView .card.active {
+  border-color: var(--m-accent);
+  box-shadow: 0 0 0 1px var(--m-accent);
+}
+
+#metricsView .card .value {
+  display: block;
+  font-size: 1.5rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+#metricsView .card .pct {
+  font-size: 0.85rem;
+  color: var(--m-muted);
+  font-weight: normal;
+  margin-left: 0.3rem;
+}
+
+#metricsView .card .label {
+  display: block;
+  font-size: 0.85rem;
+}
+
+#metricsExplorer {
+  margin-top: 1.5rem;
+}
+
+#metricsControls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+#metricsControls button {
+  margin: 0;
+}
+
+/* Theme stylesheets often make inputs and selects full width and tall, so the sizing here
+   needs !important to win (as .cif-viewer-btn does in the plugin). */
+#metricsSearch {
+  flex: 1 1 240px !important;
+  width: auto !important;
+  min-width: 0 !important;
+  height: auto !important;
+  margin: 0 !important;
+  padding: 0.35rem 0.5rem !important;
+  font-size: 0.9rem !important;
+}
+
+#metricsFilter {
+  flex: 0 1 auto !important;
+  width: auto !important;
+  max-width: 100% !important;
+  height: auto !important;
+  margin: 0 !important;
+  padding: 0.3rem 0.5rem !important;
+  font-size: 0.9rem !important;
+}
+
+#metricsTableWrap {
+  overflow: auto;
+  max-height: 70vh;
+  border: 1px solid var(--m-border);
+  border-radius: 8px;
+}
+
+#metricsTable {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0;
+  font-size: 0.85rem;
+}
+
+#metricsTable th,
+#metricsTable td {
+  padding: 0.3rem 0.5rem;
+  border: 0;
+  border-bottom: 1px solid #eeeeee;
+  text-align: left;
+  white-space: nowrap;
+}
+
+#metricsTable td.formula {
+  white-space: normal;
+  min-width: 12rem;
+  font-family: ui-monospace, Consolas, monospace;
+}
+
+#metricsTable td.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+#metricsTable th {
+  position: sticky;
+  top: 0;
+  background: var(--m-panel-bg);
+  cursor: pointer;
+  user-select: none;
+}
+
+#metricsTable tbody tr {
+  cursor: pointer;
+}
+
+#metricsTable tbody tr:hover {
+  background: #f0f5fb;
+}
+
+#metricsTable .bad {
+  color: #b42318;
+}
+
+#metricsPager {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  justify-content: center;
+  margin-top: 0.5rem;
+}
+
+#metricsPager button {
+  margin: 0;
+}
+
+#metricsDetail {
+  max-width: min(700px, 92vw);
+  border: 1px solid var(--m-border);
+  border-radius: 12px;
+}
+
+#metricsDetail .close {
+  float: right;
+}
+
+#metricsDetailTable td {
+  padding: 0.2rem 0.6rem 0.2rem 0;
+  border: 0;
+  vertical-align: top;
+  font-size: 0.9rem;
+}
+
+#metricsDetailTable td:first-child {
+  color: var(--m-muted);
+  white-space: nowrap;
+}
+
+#metricsDetailTable td:last-child {
+  font-family: ui-monospace, Consolas, monospace;
+  word-break: break-word;
+}
