@@ -2,7 +2,7 @@
 /**
  * Plugin Name: ODR RRUFF CIF Viewer
  * Description: Reads a CIF and creates the AMC header
- * Version: 1.0.6
+ * Version: 1.0.7
  * Author: Nathan
  */
 
@@ -10,7 +10,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'CIF_VIEWER_VERSION', '1.0.6' );
+define( 'CIF_VIEWER_VERSION', '1.0.7' );
 define( 'CIF_VIEWER_URL', plugin_dir_url( __FILE__ ) );
 define( 'CIF_VIEWER_TOKEN_URL', 'https://www.rruff.net/odr_rruff/api/v4/token' );
 define( 'CIF_VIEWER_RECORD_URL', 'https://www.rruff.net/odr_rruff/api/v4/dataset/record/' );
@@ -386,7 +386,7 @@ function cif_viewer_shortcode() {
 			<p id="metricsSource"></p>
 
 			<div id="metricsLoadPanel" hidden>
-				<p>No metrics data found on the server. Choose the metrics.json file made by scripts/metrics.js:</p>
+				<p>Choose JSON file</p>
 				<input type="file" id="metricsFile" accept=".json">
 			</div>
 
