@@ -106,11 +106,27 @@ function copyPlaces(M, places) {
   ));
 }
 
+// --- Anisotropic displacement ---
+// An atom's U(i,j) or B(i,j) terms, [11, 22, 33, 12, 13, 23], are a symmetric 3x3 matrix
+// beta. A copy made by an operation with rotation part R (the 3x3 part of the matrix that
+// moves x, y, z; the translation doesn't matter) has R beta R^t. That is exact for B(i,j)
+// (beta_ij, in fractional coordinates), and U(i,j) (scaled by the reciprocal lengths) goes
+// the same way since an operation only ever swaps or mixes axes of the same length.
+function rotateAniso(R, [b11, b22, b33, b12, b13, b23]) {
+  const beta = [[b11, b12, b13], [b12, b22, b23], [b13, b23, b33]];
+  const Rb = R.map(row => [0, 1, 2].map(j => row.reduce((s, r, k) => s + r * beta[k][j], 0)));
+  const out = Rb.map(row => R.map(rrow => row.reduce((s, v, k) => s + v * rrow[k], 0)));
+  return [out[0][0], out[1][1], out[2][2], out[0][1], out[0][2], out[1][2]];
+}
+
 // cell: { a, b, c, alpha, beta, gamma } as numbers; ops: the group's operations, identity
-// first; atoms: [{ label, x, y, z, occ, places }] as numbers (occ may be undefined; places,
-// the decimals each coordinate was written with, may be left out for 5). Returns one entry
-// per position in the cell, { label, x, y, z, occ, places, site }, site being the index of
-// the atom it came from, in the order of the atoms and then of the operations. Throws when
+// first; atoms: [{ label, x, y, z, occ, places, iso, isoPlaces, aniso, anisoPlaces }] as
+// numbers (occ may be undefined; places, the decimals each coordinate was written with, may
+// be left out for 5; iso, the Uiso or Biso, and aniso, the six U(i,j) or B(i,j) terms, may
+// be left out, with the decimals they were written with). Returns one entry per position in
+// the cell, { label, x, y, z, occ, places, iso, isoPlaces, aniso, anisoPlaces, site }, site
+// being the index of the atom it came from, in the order of the atoms and then of the
+// operations, aniso turned by the operation that made the copy (rotateAniso). Throws when
 // an atom has a coordinate that isn't a number.
 function expandAtoms(cell, ops, atoms) {
   const G = metricTensor(cell);
@@ -147,7 +163,12 @@ function expandAtoms(cell, ops, atoms) {
     const cluster = Math.max(...positions.map(p => positions.filter(q => cellDistance(G, p, q) < NEAR).length));
     const split = cluster > 1 && siteOccupancy * cluster <= 1.02;
     const kept = split ? copies : copies.filter(([p], i) => !positions.slice(0, i).some(q => cellDistance(G, p, q) < NEAR));
-    return kept.map(([[x, y, z], , copyDecimals]) => ({ label: atom.label, x, y, z, occ: atom.occ, places: copyDecimals, site }));
+    return kept.map(([[x, y, z], R, copyDecimals]) => ({
+      label: atom.label, x, y, z, occ: atom.occ, places: copyDecimals,
+      iso: atom.iso, isoPlaces: atom.isoPlaces,
+      aniso: atom.aniso && rotateAniso(R, atom.aniso), anisoPlaces: atom.anisoPlaces,
+      site,
+    }));
   });
 }
 
@@ -157,15 +178,83 @@ function formatCoordinate(v, places = 5) {
   return Number(s) >= 1 ? (0).toFixed(places) : s;
 }
 
+// --- Sites shared by several elements ---
+// A site holding more than one element is listed once per element at the same coordinates
+// (Cu1 .42 and Al1 .58 at 0 0 0). In the unit cell they're one line, labelled with each
+// element and its occupancy in the order listed ("Cu.42Al.58"), the occupancy being their
+// sum (less than 1 when part of the site is empty). Copies closer than SAME (in Å) are at the
+// same coordinates; an atom split over positions close together (beyond rounding) is not.
+const SAME = 0.01;
+
+// What a label stands for in a shared site's label: its element ("Ba1" Ba) with its charge
+// when the label gives one ("Fe3+1" Fe3+, so Aegirine's Fe3+ and Fe2+ stay apart), "Wat" for
+// water and "OH" for a hydroxyl (see atomsOf), or the label itself when it names no element.
+function siteSymbol(label) {
+  if (/^Wat/i.test(label)) return 'Wat';
+  if (/^O-?H/.test(label)) return 'OH';
+  const element = elementOf(label);
+  if (!element) return label;
+  const charge = label.slice(element.length).match(/^\d[+-]/);
+  return element + (charge ? charge[0] : '');
+}
+
+// The expanded atoms (as expandAtoms gives them) with those from different listed atoms at
+// the same coordinates made one entry, which keeps the first one's coordinates and
+// displacement values. The rest are unchanged.
+function mergeSharedSites(cell, expanded) {
+  const G = metricTensor(cell);
+  const groups = [];
+  for (const atom of expanded) {
+    const group = groups.find(g => g.every(other => other.site !== atom.site) && cellDistance(G, [g[0].x, g[0].y, g[0].z], [atom.x, atom.y, atom.z]) < SAME);
+    if (group) group.push(atom);
+    else groups.push([atom]);
+  }
+  return groups.map(group => {
+    if (group.length === 1) return group[0];
+    const amounts = new Map();
+    for (const atom of group) amounts.set(siteSymbol(atom.label), (amounts.get(siteSymbol(atom.label)) || 0) + occupancy(atom));
+    const label = [...amounts].map(([symbol, occ]) => symbol + formatAmount(occ)).join('');
+    return { ...group[0], label, occ: [...amounts.values()].reduce((a, b) => a + b, 0) };
+  });
+}
+
+// A displacement term to `places` decimals, never "-0.0000".
+function formatDisplacement(v, places = 5) {
+  const s = v.toFixed(places);
+  return Number(s) === 0 ? s.replace('-', '') : s;
+}
+
+// An occupancy as shown: blank when the site is full or the value isn't a number, as an AMC
+// file leaves it.
+function formatOccupancy(occ) {
+  if (!Number.isFinite(occ)) return '';
+  const s = String(Number(occ.toFixed(5)));
+  return s === '1' ? '' : s;
+}
+
 // The expanded atoms as a fixed-width table: label, x, y, z (each to its own decimals), occ
-// (blank when it isn't a number), the numbers and their headers right-aligned.
-function formatTable(expanded) {
+// (see formatOccupancy; the column left out when every atom is full), then, when any atom
+// has them, the Uiso or Biso and the six U(i,j) or B(i,j) terms, under the headers
+// labels.iso ('Uiso' or 'Biso') and labels.aniso ('U' or 'B'); the numbers and their
+// headers right-aligned.
+function formatTable(expanded, labels = {}) {
+  const hasOcc = expanded.some(a => formatOccupancy(a.occ) !== '');
+  const hasIso = expanded.some(a => Number.isFinite(a.iso));
+  const hasAniso = expanded.some(a => a.aniso);
   const rows = expanded.map(a => [
     a.label,
     ...[a.x, a.y, a.z].map((v, k) => formatCoordinate(v, a.places ? a.places[k] : 5)),
-    Number.isFinite(a.occ) ? String(Number(a.occ.toFixed(5))) : '',
+    ...(hasOcc ? [formatOccupancy(a.occ)] : []),
+    ...(hasIso ? [Number.isFinite(a.iso) ? formatDisplacement(a.iso, a.isoPlaces) : ''] : []),
+    ...(hasAniso ? (a.aniso ? a.aniso.map(v => formatDisplacement(v, a.anisoPlaces)) : ['', '', '', '', '', '']) : []),
   ]);
-  const headers = ['atom', 'x', 'y', 'z', 'occ'];
+  const anisoLabel = labels.aniso || 'U';
+  const headers = [
+    'atom', 'x', 'y', 'z',
+    ...(hasOcc ? ['occ'] : []),
+    ...(hasIso ? [labels.iso || 'Uiso'] : []),
+    ...(hasAniso ? ['1,1', '2,2', '3,3', '1,2', '1,3', '2,3'].map(ij => `${anisoLabel}(${ij})`) : []),
+  ];
   const widths = headers.map((h, col) => Math.max(h.length, ...rows.map(r => r[col].length)));
   const line = cells => cells.map((c, col) => (col ? c.padStart(widths[col]) : c.padEnd(widths[col]))).join('  ').trimEnd();
   return [line(headers), ...rows.map(line)].join('\n');
@@ -269,7 +358,7 @@ function chemistryCifLines(chem) {
   return [top, bottom];
 }
 
-return { NEAR, ATOMIC_MASS, chemistryCifLines, roundingError, writtenPlaces, expandAtoms, formatCoordinate, formatTable, elementOf, atomsOf, chemistry };
+return { NEAR, SAME, ATOMIC_MASS, chemistryCifLines, roundingError, writtenPlaces, expandAtoms, rotateAniso, mergeSharedSites, formatCoordinate, formatTable, elementOf, atomsOf, chemistry };
 })();
 
 if (typeof module !== 'undefined') module.exports = UnitCell;

@@ -722,20 +722,8 @@ function isHexagonalCellAngles(block) {
   return is90(alpha) && is90(beta) && is120(gamma);
 }
 
-// Builds one block's atom table (label, x, y, z, occupancy, Uiso, and the 6 ADP terms
-// when refined anisotropically) straight from that block's own _atom_site/
-// _atom_site_aniso loops, keeping the CIF's own atom labels and values as-is - no
-// relabeling or splitting of disordered sites (that requires chemistry knowledge -
-// e.g. which fraction of a mixed site is Cl vs water - that isn't present in the CIF).
-function buildAtomTableRows(block) {
-  const atomLoop = getAtomSiteLoop(block);
-  if (!atomLoop) return null;
-
-  const labelIdx = atomLoop.tags.indexOf('_atom_site_label');
-  const xIdx = atomLoop.tags.indexOf('_atom_site_fract_x');
-  const yIdx = atomLoop.tags.indexOf('_atom_site_fract_y');
-  const zIdx = atomLoop.tags.indexOf('_atom_site_fract_z');
-  const occIdx = atomLoop.tags.indexOf('_atom_site_occupancy');
+// The atom loop's isotropic displacement column and whether it is Uiso or Biso.
+function isoColumn(atomLoop) {
   // Some CIFs report the isotropic displacement parameter as B instead of U (two
   // different unit conventions for the same physical quantity, B = 8pi^2 * U) via a
   // completely separate tag, _atom_site_B_iso_or_equiv - when that tag is present,
@@ -751,7 +739,24 @@ function buildAtomTableRows(block) {
   const thermalTypeIdx = atomLoop.tags.indexOf('_atom_site_thermal_displace_type');
   const typedAsBiso = thermalTypeIdx !== -1 &&
     atomLoop.rows.some(row => (row[thermalTypeIdx] || '').trim().toLowerCase() === 'biso');
-  const isoLabel = (bisoIdx !== -1 || typedAsBiso) ? 'Biso' : 'Uiso';
+  return { isoIdx, isoLabel: (bisoIdx !== -1 || typedAsBiso) ? 'Biso' : 'Uiso' };
+}
+
+// Builds one block's atom table (label, x, y, z, occupancy, Uiso, and the 6 ADP terms
+// when refined anisotropically) straight from that block's own _atom_site/
+// _atom_site_aniso loops, keeping the CIF's own atom labels and values as-is - no
+// relabeling or splitting of disordered sites (that requires chemistry knowledge -
+// e.g. which fraction of a mixed site is Cl vs water - that isn't present in the CIF).
+function buildAtomTableRows(block) {
+  const atomLoop = getAtomSiteLoop(block);
+  if (!atomLoop) return null;
+
+  const labelIdx = atomLoop.tags.indexOf('_atom_site_label');
+  const xIdx = atomLoop.tags.indexOf('_atom_site_fract_x');
+  const yIdx = atomLoop.tags.indexOf('_atom_site_fract_y');
+  const zIdx = atomLoop.tags.indexOf('_atom_site_fract_z');
+  const occIdx = atomLoop.tags.indexOf('_atom_site_occupancy');
+  const { isoIdx, isoLabel } = isoColumn(atomLoop);
 
   const anisoLoop = getAtomSiteAnisoLoop(block);
   const anisoLabelIdx = anisoLoop ? anisoLoop.tags.indexOf('_atom_site_aniso_label') : -1;
@@ -820,16 +825,32 @@ function unitCellFromCif(data) {
     const col = tag => loop.tags.indexOf(tag);
     const [labelIdx, xIdx, yIdx, zIdx, occIdx] = [...ATOM_SITE_TAGS, '_atom_site_occupancy'].map(col);
     const number = value => parseFloat(stripUncertainty(value));
-    const atoms = loop.rows.map(row => ({
-      label: normalizeAtomLabel(row[labelIdx]),
-      x: number(row[xIdx]),
-      y: number(row[yIdx]),
-      z: number(row[zIdx]),
-      places: [xIdx, yIdx, zIdx].map(k => UnitCell.writtenPlaces(row[k])),
-      // A missing occupancy is a full one.
-      occ: occIdx !== -1 && !isPlaceholderValue(row[occIdx]) ? number(row[occIdx]) : 1,
-    }));
-    return { cell, atoms: UnitCell.expandAtoms(cell, ops, atoms) };
+    const given = value => value !== undefined && !isPlaceholderValue(value);
+    // The Uiso or Biso, as buildAtomTableRows reads it, and the aniso loop's U_ij terms, or
+    // its beta_ij ones (which an AMC file calls B(i,j)).
+    const { isoIdx, isoLabel } = isoColumn(loop);
+    const anisoLoop = getAtomSiteAnisoLoop(block);
+    const [aniso, anisoIdx] = [['U', ANISO_COLUMN_ORDER], ['B', ANISO_COLUMN_ORDER.map(tag => tag.replace('_U_', '_beta_'))]]
+      .map(([name, tags]) => [name, anisoLoop ? tags.map(tag => anisoLoop.tags.indexOf(tag)) : []])
+      .find(([, idx]) => idx.length && idx.every(k => k !== -1)) || [undefined, []];
+    const anisoByLabel = new Map(aniso ? anisoLoop.rows.map(row => [row[anisoLoop.tags.indexOf('_atom_site_aniso_label')], row]) : []);
+    const atoms = loop.rows.map(row => {
+      const anisoRow = anisoByLabel.get(row[labelIdx]);
+      const anisoText = anisoRow ? anisoIdx.map(k => anisoRow[k]) : [];
+      return {
+        label: normalizeAtomLabel(row[labelIdx]),
+        x: number(row[xIdx]),
+        y: number(row[yIdx]),
+        z: number(row[zIdx]),
+        places: [xIdx, yIdx, zIdx].map(k => UnitCell.writtenPlaces(row[k])),
+        // A missing occupancy is a full one.
+        occ: occIdx !== -1 && !isPlaceholderValue(row[occIdx]) ? number(row[occIdx]) : 1,
+        ...(isoIdx !== -1 && given(row[isoIdx]) ? { iso: number(row[isoIdx]), isoPlaces: UnitCell.writtenPlaces(row[isoIdx]) } : {}),
+        ...(anisoText.length && anisoText.every(given) ? { aniso: anisoText.map(number), anisoPlaces: Math.max(...anisoText.map(UnitCell.writtenPlaces)) } : {}),
+      };
+    });
+    const labels = { iso: isoIdx !== -1 ? isoLabel : undefined, aniso };
+    return { cell, atoms: UnitCell.expandAtoms(cell, ops, atoms), labels };
   });
   if (results.length === 0) throw new Error('No atom data found.');
   return results;
@@ -895,14 +916,14 @@ function renderUnitCell(fileName, build) {
   try {
     const datasets = build();
     const unknown = new Set();
-    output.value = datasets.map(({ cell, atoms }, i) => {
+    output.value = datasets.map(({ cell, atoms, labels }, i) => {
       const chem = UnitCell.chemistry(atoms, cell);
       chem.unknown.forEach(label => unknown.add(label));
       return [
         ...(datasets.length > 1 ? [`Dataset ${i + 1}`] : []),
         ...UnitCell.chemistryCifLines(chem).flat(),
         '',
-        UnitCell.formatTable(atoms),
+        UnitCell.formatTable(UnitCell.mergeSharedSites(cell, atoms), labels),
       ].join('\n');
     }).join('\n\n');
     status.textContent = `From ${fileName}: ${datasets.map(({ atoms }) => atoms.length).join(' + ')} atoms in the cell`
@@ -1090,6 +1111,8 @@ async function fetchRecordForUuid(uuid) {
     status.textContent = 'Fetched successfully.';
     if (currentCifData) renderData(currentCifData);
     else renderData({ blockName: '', tags: {}, loops: [], blocks: [] });
+    // Also turn the record's AMC file into a CIF (amc2cif-ui.js, loaded after this file).
+    showCifFromApiRecord(currentApiRecord);
   } catch (err) {
     status.textContent = `Error: ${err.message}`;
   }

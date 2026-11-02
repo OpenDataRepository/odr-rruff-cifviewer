@@ -6,6 +6,17 @@ wordpress-plugin/odr-rruff-cifviewer/composer.lock
 response.json
 scripts/amcsd_uuids.json
 data/*.csv
+!data/ODRSpaceGroups.csv
 data/*.xlsx
+data/Generators.txt
+data/GeneratorXYZs/
+data/GeneratorMs/
 data/metrics.json
 wordpress-plugin/odr-rruff-cifviewer/data/metrics.json
+data/symmetry_payloads.json
+data/symmetry_record_*.json
+data/symmetry_record_uuids.json
+data/symmetry_fields.json
+data/symmetry_all_records.json
+data/symmetry_check.json
+data/symmetry_send*.log
