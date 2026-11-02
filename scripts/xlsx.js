@@ -5,6 +5,7 @@
 // JS numbers become numeric cells; everything else is written as a text cell (and formatted as
 // Text), so values like "-x,y,z" are never read as formulas. Empty strings are left blank.
 // Each sheet gets a bold, frozen header row with filters, and column widths fitted to the data.
+// Text with line breaks is wrapped, so each line shows on its own line in the cell.
 // The workbook is a zip of a few XML parts, packed here with Node's built-in zlib.
 
 const fs = require('fs');
@@ -23,27 +24,28 @@ function colName(i) {
   return s;
 }
 
-// Style indexes into cellXfs below: 0 = number, 1 = bold header (text), 2 = text.
+// Style indexes into cellXfs below: 0 = number, 1 = bold header (text), 2 = text, 3 = wrapped text.
 const STYLES = XML_HEAD + `<styleSheet xmlns="${NS_MAIN}">` +
   '<fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts>' +
   '<fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills>' +
   '<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>' +
   '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>' +
-  '<cellXfs count="3"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>' +
+  '<cellXfs count="4"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>' +
   '<xf numFmtId="49" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1" applyNumberFormat="1"/>' +
-  '<xf numFmtId="49" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/></cellXfs>' +
+  '<xf numFmtId="49" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>' +
+  '<xf numFmtId="49" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1" applyAlignment="1"><alignment wrapText="1" vertical="top"/></xf></cellXfs>' +
   '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>';
 
 function sheetXml(rows) {
   const width = Math.max(...rows.map(r => r.length));
   const colWidths = Array.from({ length: width }, (_, j) =>
-    Math.min(60, Math.max(...rows.map(r => String(r[j] ?? '').length)) + 2));
+    Math.min(60, Math.max(...rows.map(r => Math.max(...String(r[j] ?? '').split('\n').map(l => l.length)))) + 2));
   const body = rows.map((row, i) => {
     const cells = row.map((v, j) => {
       const ref = `${colName(j)}${i + 1}`;
       if (typeof v === 'number') return `<c r="${ref}"><v>${v}</v></c>`;
       if (v === '' || v == null) return '';
-      return `<c r="${ref}" t="inlineStr" s="${i === 0 ? 1 : 2}"><is><t xml:space="preserve">${escapeXml(v)}</t></is></c>`;
+      return `<c r="${ref}" t="inlineStr" s="${i === 0 ? 1 : /\n/.test(v) ? 3 : 2}"><is><t xml:space="preserve">${escapeXml(v)}</t></is></c>`;
     }).join('');
     return `<row r="${i + 1}">${cells}</row>`;
   }).join('');

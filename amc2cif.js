@@ -237,21 +237,32 @@ function unitCellFromAmc(text) {
   return datasets.map(unitCellOfDataset);
 }
 
-// One dataset's unit cell, { cell, atoms }.
+// One dataset's unit cell, { cell, atoms, labels }, labels naming its displacement columns
+// for UnitCell.formatTable ({ iso: 'Uiso' or 'Biso', aniso: 'U' or 'B' }).
 function unitCellOfDataset(dataset) {
   const cell = Object.fromEntries(['a', 'b', 'c', 'alpha', 'beta', 'gamma'].map(k => [k, parseFloat(dataset.cell[k])]));
   const col = name => dataset.columns.indexOf(name);
   const [xIdx, yIdx, zIdx, occIdx] = ['fract_x', 'fract_y', 'fract_z', 'occupancy'].map(col);
-  const atoms = dataset.rows.map(row => ({
-    label: row.label,
-    x: amcNumber(row.values[xIdx]),
-    y: amcNumber(row.values[yIdx]),
-    z: amcNumber(row.values[zIdx]),
-    places: [xIdx, yIdx, zIdx].map(i => UnitCell.writtenPlaces(row.values[i])),
-    // A blank occupancy is a full one.
-    occ: occIdx !== -1 && row.values[occIdx] ? amcNumber(row.values[occIdx]) : 1,
-  }));
-  return { cell, atoms: UnitCell.expandAtoms(cell, amcSymmetryMatrices(dataset.cell, dataset.originShift), atoms) };
+  const iso = ['Uiso', 'Biso'].find(name => col(name) !== -1);
+  const aniso = ['U', 'B'].find(c => ['11', '22', '33', '12', '13', '23'].every(ij => col(c + ij) !== -1));
+  const anisoIdx = aniso ? ['11', '22', '33', '12', '13', '23'].map(ij => col(aniso + ij)) : [];
+  const atoms = dataset.rows.map(row => {
+    const anisoText = anisoIdx.map(i => row.values[i]);
+    return {
+      label: row.label,
+      x: amcNumber(row.values[xIdx]),
+      y: amcNumber(row.values[yIdx]),
+      z: amcNumber(row.values[zIdx]),
+      places: [xIdx, yIdx, zIdx].map(i => UnitCell.writtenPlaces(row.values[i])),
+      // A blank occupancy is a full one.
+      occ: occIdx !== -1 && row.values[occIdx] ? amcNumber(row.values[occIdx]) : 1,
+      ...(iso && row.values[col(iso)] ? { iso: amcNumber(row.values[col(iso)]), isoPlaces: UnitCell.writtenPlaces(row.values[col(iso)]) } : {}),
+      // An atom refined isotropically in an anisotropic dataset has its U(i,j) blank.
+      ...(aniso && anisoText.every(Boolean) ? { aniso: anisoText.map(amcNumber), anisoPlaces: Math.max(...anisoText.map(UnitCell.writtenPlaces)) } : {}),
+    };
+  });
+  const ops = amcSymmetryMatrices(dataset.cell, dataset.originShift);
+  return { cell, atoms: UnitCell.expandAtoms(cell, ops, atoms), labels: { iso, aniso } };
 }
 
 const AMC_CELL_LINE_RE = /^(-?[\d.]+)\s+(-?[\d.]+)\s+(-?[\d.]+)\s+(-?[\d.]+)\s+(-?[\d.]+)\s+(-?[\d.]+)\s+(\S+)$/;

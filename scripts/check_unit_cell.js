@@ -79,7 +79,7 @@ function compare(fromCif, fromAmc) {
   // Same atoms, but the tables don't print the same (a value written with more decimals in
   // one file than the other).
   for (let i = 0; i < fromCif.length; i++) {
-    const [a, b] = [fromCif[i], fromAmc[i]].map(d => lib.UnitCell.formatTable(d.atoms.map(x => ({ ...x, label: '-' })))
+    const [a, b] = [fromCif[i], fromAmc[i]].map(d => lib.UnitCell.formatTable(d.atoms.map(x => ({ ...x, label: "-", iso: undefined, aniso: undefined })))
       .split('\n').slice(1).map(l => l.trim().split(/\s+/).join(' ')));
     const k = a.findIndex((l, k) => l !== b[k]);
     if (k !== -1) return ['printed', `${fromCif[i].atoms[k].label}: "${a[k]}" vs "${b[k]}"`];
@@ -93,9 +93,9 @@ function compare(fromCif, fromAmc) {
 }
 
 function printUnitCell(file) {
-  unitCellFromFile(file).forEach(({ atoms }, i, all) => {
+  unitCellFromFile(file).forEach(({ cell, atoms, labels }, i, all) => {
     if (all.length > 1) console.log(`Dataset ${i + 1}`);
-    console.log(lib.UnitCell.formatTable(atoms));
+    console.log(lib.UnitCell.formatTable(lib.UnitCell.mergeSharedSites(cell, atoms), labels));
     console.log(`${atoms.length} atoms\n`);
   });
 }
