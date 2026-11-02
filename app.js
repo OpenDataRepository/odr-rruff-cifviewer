@@ -1104,6 +1104,8 @@ async function fetchRecordForUuid(uuid) {
     status.textContent = 'Fetched successfully.';
     if (currentCifData) renderData(currentCifData);
     else renderData({ blockName: '', tags: {}, loops: [], blocks: [] });
+    // Also turn the record's AMC file into a CIF (amc2cif-ui.js, loaded after this file).
+    showCifFromApiRecord(currentApiRecord);
   } catch (err) {
     status.textContent = `Error: ${err.message}`;
   }
