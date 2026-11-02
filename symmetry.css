@@ -84,6 +84,19 @@
 }
 
 /* One row per space group number, the symbols lined up in columns. */
+/* WordPress themes border and pad every table, row and cell; these tables set their own. */
+#symmetryView table,
+#symmetryView tr,
+#symmetryView th,
+#symmetryView td {
+  border: 0;
+  background: none;
+}
+
+#symmetryView table {
+  margin: 0;
+}
+
 #symmetryView .sg-rows {
   border-collapse: collapse;
   width: 100%;
@@ -164,6 +177,7 @@
 
 #symmetryView .sg-op-table {
   border-collapse: collapse;
+  width: 100%;
   background: var(--s-bg);
 }
 
@@ -196,6 +210,8 @@
   border-left: 1.5px solid currentColor;
   border-right: 1.5px solid currentColor;
   border-radius: 10px;
+  width: auto;
+  margin: 0 auto;
   padding: 0.1rem 0.35rem;
   font-family: ui-monospace, Consolas, monospace;
   font-size: 0.85rem;
@@ -204,6 +220,7 @@
 #symmetryView .sg-matrix td {
   border: 0;
   padding: 0 0.4rem;
+  line-height: 1.5;
   text-align: right;
 }
 
