@@ -6,6 +6,8 @@
   --s-border: var(--cifv-border, var(--border, #cccccc));
   --s-muted: #555555;
   --s-accent: #2b6cb0;
+  --s-chip-border: #c9dcf0;
+  --s-chip-hover: #e6f1fb;
   --s-error: #b42318;
 }
 
@@ -33,8 +35,34 @@
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
-  gap: 0.4rem 1rem;
-  margin-bottom: 1.25rem;
+  gap: 0.4rem;
+  margin-bottom: 1.5rem;
+}
+
+/* The crystal systems as pills, filled with the card blue, each with its number range. */
+#symmetryView .sg-nav-pill {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  padding: 0.45rem 0.8rem;
+  border: 1px solid var(--s-chip-border);
+  border-radius: 999px;
+  background: #f1f6fb;
+  font-weight: 500;
+  line-height: 1.3;
+  transition: border-color 0.15s, background-color 0.15s;
+}
+
+#symmetryView .sg-nav-pill:hover {
+  text-decoration: none;
+  border-color: var(--s-accent);
+  background: var(--s-chip-hover);
+}
+
+#symmetryView .sg-nav-range {
+  font-size: 0.78rem;
+  font-weight: normal;
+  color: var(--s-muted);
 }
 
 #symmetryView a {
@@ -46,13 +74,42 @@
   text-decoration: underline;
 }
 
-#symmetryView .sg-system,
-#symmetryView .sg-ops,
-#symmetryView .sg-others {
+#symmetryView .sg-system {
   background: var(--s-panel-bg);
   border-radius: 20px;
   padding: 1rem 1.5rem 1.25rem;
   margin-bottom: 1rem;
+}
+
+/* The detail page's sections, in the same light blue cards as the converter. */
+#symmetryView .sg-about,
+#symmetryView .sg-ops,
+#symmetryView .sg-others {
+  background: #f1f6fb;
+  border-radius: 28px;
+  padding: 1.25rem 1.75rem 1.5rem;
+  margin-bottom: 1.25rem;
+}
+
+/* The title box is only as wide as what's in it, centered on the page. */
+#symmetryView .sg-about {
+  width: fit-content;
+  max-width: 100%;
+  box-sizing: border-box;
+  margin-left: auto;
+  margin-right: auto;
+  padding-left: 2.5rem;
+  padding-right: 2.5rem;
+}
+
+#symmetryView .sg-about h1 {
+  margin: 0.25rem 0 1rem;
+}
+
+#symmetryView .sg-ops h2,
+#symmetryView .sg-others h2 {
+  font-size: 1.46rem;
+  margin-top: 0;
 }
 
 #symmetryView h2 {
@@ -106,11 +163,12 @@
   width: 2.5rem;
   text-align: left;
   vertical-align: top;
-  padding: 0.25rem 0.5rem 0.25rem 0;
+  /* Lines the number up with the text of the first row of chips. */
+  padding: 0.65rem 0.5rem 0.25rem 0;
 }
 
 #symmetryView .sg-rows td {
-  padding: 0.15rem 0;
+  padding: 0.25rem 0;
 }
 
 #symmetryView .sg-rows tr:target {
@@ -120,59 +178,129 @@
 
 #symmetryView .sg-line {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   flex-wrap: wrap;
-  padding: 0.1rem 0;
+  padding: 0.2rem 0;
 }
 
 #symmetryView .sg-setting {
-  flex: 0 0 2.5rem;
+  flex: 0 0 7rem;
   font-size: 0.8rem;
   color: var(--s-muted);
+}
+
+#symmetryView .sg-setting b {
+  color: var(--fg, #000000);
+  font-weight: 600;
+  margin-right: 0.15rem;
+}
+
+/* A solid line between space group numbers, stronger than the dashed one between settings. */
+#symmetryView .sg-rows tr + tr > th,
+#symmetryView .sg-rows tr + tr > td {
+  border-top: 1px solid var(--s-chip-border);
+}
+
+/* A faint line between the settings of one space group number. */
+#symmetryView .sg-line + .sg-line {
+  border-top: 1px dashed var(--s-chip-border);
+  margin-top: 0.2rem;
+  padding-top: 0.4rem;
 }
 
 #symmetryView .sg-symbols {
   display: flex;
   flex-wrap: wrap;
   flex: 1;
-  gap: 0.15rem 0;
+  gap: 0.4rem;
 }
 
+/* Each symbol is a rounded chip; an origin shift is a small tag inside it. */
 #symmetryView .sg-link {
-  display: inline-block;
-  min-width: 5.5rem;
-  padding-right: 0.5rem;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  padding: 0.45rem 0.75rem 0.3rem;
+  border: 1px solid var(--s-chip-border);
+  border-radius: 999px;
+  background: var(--s-bg);
+  line-height: 1.4;
+  transition: border-color 0.15s, background-color 0.15s;
+}
+
+#symmetryView .sg-link:hover {
+  text-decoration: none;
+  border-color: var(--s-accent);
+  background: var(--s-chip-hover);
 }
 
 #symmetryView .sg-shift {
-  display: block;
   font-size: 0.72rem;
   color: var(--s-muted);
 }
 
 /* The detail page */
 #symmetryView .sg-back {
-  margin-bottom: 0.5rem;
+  margin-bottom: 1rem;
 }
 
+/* "All space groups" as a pill, like the symbol chips. */
+#symmetryView .sg-back a {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.4rem 0.95rem;
+  border: 1px solid var(--s-chip-border);
+  border-radius: 999px;
+  background: var(--s-bg);
+  font-size: 0.9rem;
+  line-height: 1.3;
+  transition: border-color 0.15s, background-color 0.15s;
+}
+
+#symmetryView .sg-back a:hover {
+  text-decoration: none;
+  border-color: var(--s-accent);
+  background: var(--s-chip-hover);
+}
+
+/* Two left-aligned columns, the pair of them centered under the title, so both edges stay straight. */
 #symmetryView .sg-facts {
   display: grid;
-  grid-template-columns: max-content 1fr;
-  gap: 0.2rem 1rem;
-  max-width: 30rem;
-  margin: 0 auto 1.25rem;
+  grid-template-columns: max-content max-content;
+  justify-content: center;
+  margin: 0;
+}
+
+/* A faint line under each row; the space between the columns is padding, so the line runs through it. */
+#symmetryView .sg-facts dt,
+#symmetryView .sg-facts dd {
+  padding: 0.35rem 0;
+  border-bottom: 1px solid var(--s-chip-border);
+}
+
+#symmetryView .sg-facts dt:last-of-type,
+#symmetryView .sg-facts dd:last-of-type {
+  border-bottom: 0;
 }
 
 #symmetryView .sg-facts dt {
   color: var(--s-muted);
+  padding-right: 1.5rem;
 }
 
 #symmetryView .sg-facts dd {
   margin: 0;
 }
 
-#symmetryView .sg-others .sg-link {
-  margin-bottom: 0.3rem;
+/* A faint line under "Other symbols for space group N", like the lines in the title box. */
+#symmetryView .sg-others h2 {
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--s-chip-border);
+}
+
+#symmetryView .sg-others .sg-symbols {
+  margin-top: 0.85rem;
 }
 
 #symmetryView .sg-op-table {
@@ -226,13 +354,10 @@
 
 @media (max-width: 600px) {
   #symmetryView .sg-system,
+  #symmetryView .sg-about,
   #symmetryView .sg-ops,
   #symmetryView .sg-others {
     padding: 0.75rem;
-  }
-
-  #symmetryView .sg-link {
-    min-width: 5rem;
   }
 
   #symmetryView .sg-ops {
