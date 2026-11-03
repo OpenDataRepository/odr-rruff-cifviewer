@@ -16,6 +16,7 @@ const ROOT = __dirname;
 const PORT = Number(process.env.PORT) || 8000;
 const TOKEN_URL = 'https://www.rruff.net/odr_rruff/api/v4/token';
 const RECORD_URL = 'https://www.rruff.net/odr_rruff/api/v4/dataset/record/';
+const FILE_URL = 'https://www.rruff.net/odr_rruff/api/v4/file/';
 // The ODR symmetry database the symmetry page (symmetry.html) lists.
 const SYMMETRY_DATABASE_UUID = 'e1caf946bba4b04aa57262848214';
 // Every record's UUID; a limit of 0 returns all of them.
@@ -118,10 +119,42 @@ function rateLimited(fn) {
 }
 
 async function fetchRecord(uuid) {
-  return fetchApiJson(RECORD_URL + encodeURIComponent(uuid));
+  const text = await fetchApiJson(RECORD_URL + encodeURIComponent(uuid));
+  allowCifFiles(JSON.parse(text));
+  return text;
+}
+
+// The CIF files of the records handed out, the only files /api/file/ serves, so it can't be
+// used to download any other file this account can see. ODR's own download links ask for a
+// reCAPTCHA; the API's file route doesn't, with a token.
+const CIF_FILE_FIELDS = ['Original CIF', 'Minimal CIF'];
+const allowedCifFiles = new Set();
+
+function allowCifFiles(record) {
+  for (const field of record.fields || []) {
+    if (!CIF_FILE_FIELDS.includes(field.field_name)) continue;
+    for (const file of field.files || []) allowedCifFiles.add(file.file_uuid);
+  }
+}
+
+async function fetchCifFile(fileUuid) {
+  if (!allowedCifFiles.has(fileUuid)) {
+    throw Object.assign(new Error('That file is not a CIF of a record looked up here.'), { status: 404 });
+  }
+  return JSON.stringify({ text: await fetchApiText(FILE_URL + encodeURIComponent(fileUuid)) });
 }
 
 async function fetchApiJson(url) {
+  const text = await fetchApiText(url);
+  try {
+    JSON.parse(text);
+  } catch {
+    throw Object.assign(new Error('The API returned a record that is not valid JSON.'), { status: 502 });
+  }
+  return text;
+}
+
+async function fetchApiText(url) {
   const token = await getToken();
   const res = await rateLimited(() => fetch(url, {
     headers: { Authorization: `Bearer ${token}` },
@@ -134,13 +167,7 @@ async function fetchApiJson(url) {
   if (!res.ok) {
     throw Object.assign(new Error(`Request failed: ${res.status} ${res.statusText}`), { status: res.status === 404 ? 404 : 502 });
   }
-  const text = (await res.text()).trim();
-  try {
-    JSON.parse(text);
-  } catch {
-    throw Object.assign(new Error('The API returned a record that is not valid JSON.'), { status: 502 });
-  }
-  return text;
+  return (await res.text()).trim();
 }
 
 // The symmetry page's list of every space group. GET dataset/<uuid>.json only gives this account
@@ -246,6 +273,17 @@ const server = http.createServer(async (req, res) => {
       sendJson(res, 200, await fetchRecord(recordMatch[1]));
     } catch (err) {
       console.error(`Record ${recordMatch[1]}: ${err.message}`);
+      sendJson(res, err.status || 500, { message: err.message });
+    }
+    return;
+  }
+  const fileMatch = pathname.match(/^\/api\/file\/([0-9a-fA-F]{1,64})$/);
+  if (fileMatch) {
+    if (req.method !== 'GET') return sendJson(res, 405, { message: 'Method not allowed' });
+    try {
+      sendJson(res, 200, await fetchCifFile(fileMatch[1]));
+    } catch (err) {
+      console.error(`File ${fileMatch[1]}: ${err.message}`);
       sendJson(res, err.status || 500, { message: err.message });
     }
     return;

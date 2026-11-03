@@ -2,7 +2,7 @@
 /**
  * Plugin Name: ODR RRUFF CIF Viewer
  * Description: Reads a CIF and creates the AMC header
- * Version: 1.0.9
+ * Version: 1.0.10
  * Author: Nathan
  */
 
@@ -10,10 +10,11 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'CIF_VIEWER_VERSION', '1.0.9' );
+define( 'CIF_VIEWER_VERSION', '1.0.10' );
 define( 'CIF_VIEWER_URL', plugin_dir_url( __FILE__ ) );
 define( 'CIF_VIEWER_TOKEN_URL', 'https://www.rruff.net/odr_rruff/api/v4/token' );
 define( 'CIF_VIEWER_RECORD_URL', 'https://www.rruff.net/odr_rruff/api/v4/dataset/record/' );
+define( 'CIF_VIEWER_FILE_URL', 'https://www.rruff.net/odr_rruff/api/v4/file/' );
 // The ODR symmetry database the [odr_rruff_symmetry] page lists, and its every
 // record UUID (a limit of 0 returns all of them).
 define( 'CIF_VIEWER_SYMMETRY_DATABASE_UUID', 'e1caf946bba4b04aa57262848214' );
@@ -189,6 +190,19 @@ function cif_viewer_rest_error( $message, $detail, $status ) {
 // need a CORS preflight, and the API answers OPTIONS with 405, so the browser
 // reports "Failed to fetch".
 function cif_viewer_api_get( $url ) {
+	$body = cif_viewer_api_get_text( $url );
+	if ( is_wp_error( $body ) ) {
+		return $body;
+	}
+	$data = json_decode( $body, true );
+	if ( null === $data ) {
+		return cif_viewer_rest_error( 'The API returned a record that is not valid JSON.', '', 502 );
+	}
+	return $data;
+}
+
+// GETs an API URL server-to-server and returns its body as text, or a WP_Error.
+function cif_viewer_api_get_text( $url ) {
 	list( $token, $token_source ) = cif_viewer_api_token();
 	if ( '' === $token ) {
 		return cif_viewer_rest_error( 'The server could not get an API token.', cif_viewer_token_error(), 500 );
@@ -215,17 +229,42 @@ function cif_viewer_api_get( $url ) {
 		return cif_viewer_rest_error( 'Request failed: ' . $code . '.', '', 404 === $code ? 404 : 502 );
 	}
 
-	$data = json_decode( trim( wp_remote_retrieve_body( $res ) ), true );
-	if ( null === $data ) {
-		return cif_viewer_rest_error( 'The API returned a record that is not valid JSON.', '', 502 );
-	}
-	return $data;
+	return trim( wp_remote_retrieve_body( $res ) );
 }
 
 // Fetches an ODR record for the converter.
 function cif_viewer_rest_record( WP_REST_Request $request ) {
 	$data = cif_viewer_api_get( CIF_VIEWER_RECORD_URL . rawurlencode( $request['uuid'] ) );
-	return is_wp_error( $data ) ? $data : rest_ensure_response( $data );
+	if ( is_wp_error( $data ) ) {
+		return $data;
+	}
+	cif_viewer_allow_cif_files( $data );
+	return rest_ensure_response( $data );
+}
+
+// The CIF files of the records handed out are the only files the file route serves, so it
+// can't be used to download any other file the API account can see. ODR's own download
+// links ask for a reCAPTCHA; the API's file route doesn't, with a token.
+function cif_viewer_allow_cif_files( $record ) {
+	foreach ( isset( $record['fields'] ) ? $record['fields'] : array() as $field ) {
+		if ( ! in_array( $field['field_name'], array( 'Original CIF', 'Minimal CIF' ), true ) || empty( $field['files'] ) ) {
+			continue;
+		}
+		foreach ( $field['files'] as $file ) {
+			set_transient( 'cif_viewer_cif_file_' . $file['file_uuid'], 1, DAY_IN_SECONDS );
+		}
+	}
+}
+
+// Fetches one record's CIF file for the converter, as { text }.
+function cif_viewer_rest_file( WP_REST_Request $request ) {
+	$uuid = strtolower( $request['uuid'] );
+	if ( ! get_transient( 'cif_viewer_cif_file_' . $uuid ) ) {
+		return new WP_Error( 'cif_viewer_record', 'That file is not a CIF of a record looked up here.', array( 'status' => 404 ) );
+	}
+	$text = cif_viewer_api_get_text( CIF_VIEWER_FILE_URL . rawurlencode( $uuid ) );
+	// Old CIFs can carry Latin-1 bytes, which would make the JSON response fail to encode.
+	return is_wp_error( $text ) ? $text : rest_ensure_response( array( 'text' => wp_check_invalid_utf8( $text, true ) ) );
 }
 
 // --- The symmetry page's data ---
@@ -380,6 +419,16 @@ function cif_viewer_register_rest_routes() {
 	);
 	register_rest_route(
 		'odr-rruff-cifviewer/v1',
+		'/file/(?P<uuid>[0-9a-fA-F]{1,64})',
+		array(
+			'methods'             => 'GET',
+			'callback'            => 'cif_viewer_rest_file',
+			// Public too; cif_viewer_rest_file only serves the CIFs of records looked up.
+			'permission_callback' => '__return_true',
+		)
+	);
+	register_rest_route(
+		'odr-rruff-cifviewer/v1',
 		'/symmetry',
 		array(
 			'methods'             => 'GET',
@@ -477,6 +526,7 @@ function cif_viewer_shortcode() {
 	// plugin's REST route (see cif_viewer_rest_record) instead of the API.
 	$config = array(
 		'recordProxyUrl' => rest_url( 'odr-rruff-cifviewer/v1/record/' ),
+		'fileProxyUrl'   => rest_url( 'odr-rruff-cifviewer/v1/file/' ),
 		'restNonce'      => wp_create_nonce( 'wp_rest' ),
 		// The metrics view's data (scripts/metrics.js), put in the plugin's data/ folder.
 		'metricsUrl'     => CIF_VIEWER_URL . 'data/metrics.json',
@@ -492,7 +542,7 @@ function cif_viewer_shortcode() {
 			<h1>CIF Converter</h1>
 
 			<div id="panel">
-				<div id="apiSection">
+				<div id="apiSection" hidden>
 					<h3>AMCSD Record</h3>
 					<div id="apiStatus"></div>
 				</div>
@@ -504,6 +554,14 @@ function cif_viewer_shortcode() {
 					  <span class="drop-zone-prompt">Drag &amp; drop a .cif file here, or <span class="drop-zone-link">choose a file</span></span>
 					  <span class="drop-zone-file"></span>
 					</label>
+					<div id="cifSourceSwitch" class="source-switch" hidden>
+						<label for="cifSource">CIF from the record</label>
+						<select id="cifSource">
+							<option value="original">Original CIF</option>
+							<option value="minimal">Minimal CIF</option>
+							<option value="file" hidden disabled>Dropped file</option>
+						</select>
+					</div>
 					<div id="cifToAmcStatus"></div>
 					<textarea id="amcHeaderOutput" readonly rows="1"></textarea>
 					<button id="copyHeaderBtn" class="cif-viewer-btn" type="button">Copy</button>

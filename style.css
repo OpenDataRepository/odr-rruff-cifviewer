@@ -41,10 +41,21 @@ h1 {
   color: #2b6cb0;
 }
 
-#panel {
-  background: var(--panel-bg);
-  border-radius: 20px;
-  padding: 1.5rem;
+/* Each section of the converter is its own rounded card. */
+#panel > div {
+  background: #f1f6fb;
+  border-radius: 28px;
+  padding: 1.25rem 1.75rem 1.5rem;
+  margin-bottom: 1.25rem;
+}
+
+#panel > div > h3:first-child {
+  margin-top: 0;
+}
+
+/* 25% bigger than a plain h3 (1.17em). */
+#panel > div > h3 {
+  font-size: 1.46em;
 }
 
 textarea {
@@ -66,6 +77,52 @@ textarea {
 
 button {
   margin-bottom: 0.5rem;
+}
+
+/* Which of the record's CIFs the AMC header is made from. */
+.source-switch {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem 0.75rem;
+  margin: -0.25rem 0 0.75rem;
+}
+
+.source-switch[hidden] {
+  display: none;
+}
+
+.source-switch label {
+  font-size: 0.9rem;
+  color: #555555;
+}
+
+.source-switch select {
+  appearance: none;
+  -webkit-appearance: none;
+  min-width: 12rem;
+  margin: 0;
+  padding: 0.45rem 2.25rem 0.45rem 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  /* A chevron in place of the browser's own arrow. */
+  background: var(--bg) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5l5 5 5-5' fill='none' stroke='%23555' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 0.8rem center;
+  color: var(--fg);
+  font: inherit;
+  font-size: 0.95rem;
+  line-height: 1.3;
+  cursor: pointer;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.source-switch select:hover {
+  border-color: #6a8fd8;
+}
+
+.source-switch select:focus {
+  outline: none;
+  border-color: #3b6fd8;
+  box-shadow: 0 0 0 3px rgba(59, 111, 216, 0.2);
 }
 
 #copyHeaderBtn {
@@ -126,6 +183,41 @@ button {
 .matrix-table td.diagonal {
   background: #eef4ff;
   font-weight: 600;
+}
+
+/* The button that shows or hides a drop zone (setupDropZone). */
+.drop-zone-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0.25rem 0 0.75rem;
+  padding: 0.4rem 0.9rem;
+  min-height: 0;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg);
+  color: #2b5fb8;
+  font: inherit;
+  font-size: 0.9rem;
+  line-height: 1.3;
+  text-transform: none;
+  box-shadow: none;
+  cursor: pointer;
+  transition: border-color 0.15s, background-color 0.15s;
+}
+
+.drop-zone-toggle:hover {
+  border-color: #6a8fd8;
+  background: #eef4ff;
+}
+
+.drop-zone-toggle:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(59, 111, 216, 0.2);
+}
+
+.drop-zone[hidden] {
+  display: none;
 }
 
 .drop-zone {
