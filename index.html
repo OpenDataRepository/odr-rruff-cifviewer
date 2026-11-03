@@ -13,7 +13,7 @@
     <h1>CIF Converter</h1>
 
     <div id="panel">
-      <div id="apiSection">
+      <div id="apiSection" hidden>
         <h3>AMCSD Record</h3>
         <div id="apiStatus"></div>
       </div>
@@ -25,6 +25,14 @@
           <span class="drop-zone-prompt">Drag &amp; drop a .cif file here, or <span class="drop-zone-link">choose a file</span></span>
           <span class="drop-zone-file"></span>
         </label>
+        <div id="cifSourceSwitch" class="source-switch" hidden>
+          <label for="cifSource">CIF from the record</label>
+          <select id="cifSource">
+            <option value="original">Original CIF</option>
+            <option value="minimal">Minimal CIF</option>
+            <option value="file" hidden disabled>Dropped file</option>
+          </select>
+        </div>
         <div id="cifToAmcStatus"></div>
         <textarea id="amcHeaderOutput" readonly rows="1"></textarea>
         <button id="copyHeaderBtn">Copy</button>

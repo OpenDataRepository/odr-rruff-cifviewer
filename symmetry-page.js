@@ -103,8 +103,8 @@ const byNumber = (a, b) => a.number - b.number || a.id - b.id;
 
 function groupLink(group) {
   const { symbol, shift } = parseName(group.name);
-  const note = shift ? `<span class="sg-shift" title="${escapeHtml(shiftLabel(shift))}">origin ${escapeHtml(shift.map(shiftText).join(','))}</span>` : '';
-  return `<a class="sg-link${shift ? ' sg-shifted' : ''}" href="${escapeHtml(detailUrl(group.uuid))}">${symbolHtml(symbol)}${note}</a>`;
+  const note = shift ? `<span class="sg-shift" title="${escapeHtml(shiftLabel(shift))}">${escapeHtml(shift.map(shiftText).join(','))}</span>` : '';
+  return `<a class="sg-link${shift ? ' sg-shifted' : ''}" href="${escapeHtml(detailUrl(group.uuid))}"><span>${symbolHtml(symbol)}</span>${note}</a>`;
 }
 
 // One space group number's row. Groups with settings (monoclinic unique axes, rhombohedral
@@ -116,7 +116,11 @@ function numberRow(number, groups) {
     // Origin-shifted entries go right after the symbol they shift.
     const symbols = unsorted.map(g => parseName(g.name).symbol);
     const list = unsorted.map((g, i) => [symbols.indexOf(symbols[i]), i, g]).sort((a, b) => a[0] - b[0] || a[1] - b[1]).map(e => e[2]);
-    const label = labelled ? `<span class="sg-setting">${setting === null ? '' : settingLabel(setting)}</span>` : '';
+    // ":1 axis c", so each line says which setting it is; a symbol with none says so too.
+    const name = SETTING_NAMES[setting] ? SETTING_NAMES[setting].replace(/^unique /, '').replace(/ axes$/, '') : '';
+    const label = !labelled ? ''
+      : setting === null ? '<span class="sg-setting">no setting</span>'
+      : `<span class="sg-setting"><b>${settingLabel(setting)}</b> ${escapeHtml(name)}</span>`;
     return `<div class="sg-line">${label}<span class="sg-symbols">${list.map(groupLink).join('')}</span></div>`;
   });
   return `<tr id="sg-${number}"><th scope="row">${number}</th><td>${lines.join('')}</td></tr>`;
@@ -125,16 +129,17 @@ function numberRow(number, groups) {
 function renderIndex(groups) {
   const sorted = [...groups].sort(byNumber);
   const systems = groupBy(sorted, g => g.system);
-  const nav = [...systems.keys()].map(s => `<a href="#sg-system-${escapeHtml(s)}">${escapeHtml(SYSTEM_LABELS[s] || s)}</a>`).join('');
+  const range = list => { const numbers = list.map(g => g.number); return `${Math.min(...numbers)}–${Math.max(...numbers)}`; };
+  // Each system as a pill with its space group numbers.
+  const nav = [...systems].map(([s, list]) => `<a class="sg-nav-pill" href="#sg-system-${escapeHtml(s)}">${escapeHtml(SYSTEM_LABELS[s] || s)}<span class="sg-nav-range">${range(list)}</span></a>`).join('');
 
   const sections = [...systems].map(([system, list]) => {
-    const numbers = list.map(g => g.number);
     const pointGroups = [...groupBy(list, g => g.pointGroup)].map(([pointGroup, pgList]) => {
       const rows = [...groupBy(pgList, g => g.number)].map(([number, n]) => numberRow(number, n)).join('');
       return `<h3>Point group ${symbolHtml(pointGroup)}</h3><table class="sg-rows"><tbody>${rows}</tbody></table>`;
     }).join('');
     return `<section class="sg-system" id="sg-system-${escapeHtml(system)}">
-      <h2>${escapeHtml(SYSTEM_LABELS[system] || system)} <span class="sg-range">space groups ${Math.min(...numbers)}–${Math.max(...numbers)}</span></h2>
+      <h2>${escapeHtml(SYSTEM_LABELS[system] || system)} <span class="sg-range">space groups ${range(list)}</span></h2>
       ${pointGroups}
     </section>`;
   }).join('');
@@ -215,14 +220,16 @@ function renderDetail(record, groups) {
       <div class="sg-symbols">${others.map(g => {
         const p = parseName(g.name);
         const note = [p.setting && settingLabel(p.setting), p.shift && shiftLabel(p.shift)].filter(Boolean).join(', ');
-        return `<a class="sg-link" href="${escapeHtml(detailUrl(g.uuid))}">${symbolHtml(p.symbol)}${note ? `<span class="sg-shift">${escapeHtml(note)}</span>` : ''}</a>`;
+        return `<a class="sg-link" href="${escapeHtml(detailUrl(g.uuid))}"><span>${symbolHtml(p.symbol)}</span>${note ? `<span class="sg-shift">${escapeHtml(note)}</span>` : ''}</a>`;
       }).join('')}</div>
     </section>` : '';
 
   view.innerHTML = `
     <nav class="sg-back"><a href="${escapeHtml(homeUrl(number))}">&larr; All space groups</a></nav>
-    <h1>${symbolHtml(symbol)}</h1>
-    <dl class="sg-facts">${facts}</dl>
+    <section class="sg-about">
+      <h1>${symbolHtml(symbol)}</h1>
+      <dl class="sg-facts">${facts}</dl>
+    </section>
     ${othersHtml}
     ${operatorTable('Generators', '(x,y,z) form', f['Generator XYZs'], f['Generator Ms'], true)}
     ${operatorTable('Symmetry operators', '(x,y,z) form', f.SymmetryOpXYZs, f.SymmetryOpMs, false)}
