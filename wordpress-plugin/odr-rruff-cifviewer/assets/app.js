@@ -979,8 +979,8 @@ function renderData(data) {
     ? computeMetricTensor(a, b, c, alpha, beta, gamma)
     : null;
   renderMetricTensorTable(metricTensorOutput, G);
-  // Stays hidden until a CIF with a full set of cell parameters is loaded.
-  document.getElementById('metricTensorSection').hidden = !G;
+  // The G-Matrix section stays hidden (it starts hidden in the markup); G is still worked out
+  // for the unit cell volume.
   currentGMatrix = G;
   currentCellParams = G ? { a, b, c, alpha, beta, gamma } : null;
   currentCellVolume = G ? computeCellVolume(a, b, c, alpha, beta, gamma) : null;
@@ -1005,6 +1005,21 @@ function setupDropZone(input) {
   const fileLabel = zone.querySelector('.drop-zone-file');
   const allowedExts = input.accept.split(',').map(s => s.trim().toLowerCase()).filter(s => s.startsWith('.'));
   if (input.accept.includes('text/plain')) allowedExts.push('.txt');
+
+  // While a record is loaded from ?UUID= its own files fill the page, so the drop zone waits
+  // behind a button; without a record it is all there is, so it shows straight away.
+  const toggle = document.createElement('button');
+  toggle.type = 'button';
+  toggle.className = 'drop-zone-toggle';
+  zone.before(toggle);
+  const setOpen = open => {
+    zone.hidden = !open;
+    toggle.setAttribute('aria-expanded', String(open));
+    toggle.innerHTML = `<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="${open ? 'M3 8h10' : 'M8 3v10M3 8h10'}" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>` +
+      (open ? 'Hide the upload' : `Upload your own ${allowedExts[0]} file`);
+  };
+  setOpen(!new URLSearchParams(window.location.search).get('UUID'));
+  toggle.addEventListener('click', () => setOpen(zone.hidden));
 
   input.addEventListener('change', () => {
     const file = input.files[0];
@@ -1054,18 +1069,81 @@ window.addEventListener('drop', event => event.preventDefault());
 
 setupDropZone(document.getElementById('fileInput'));
 
+function loadCifText(fileName, text) {
+  currentFileName = fileName;
+  currentCifData = parseCIF(text);
+  renderData(currentCifData);
+  renderUnitCell(fileName, () => unitCellFromCif(currentCifData));
+}
+
 document.getElementById('fileInput').addEventListener('change', event => {
   const file = event.target.files[0];
   if (!file) return;
-  currentFileName = file.name;
   const reader = new FileReader();
   reader.onload = () => {
-    currentCifData = parseCIF(reader.result);
-    renderData(currentCifData);
-    renderUnitCell(file.name, () => unitCellFromCif(currentCifData));
+    // A dropped file replaces whichever of the record's CIFs was showing.
+    recordCifRequest++;
+    markCifSource(null);
+    loadCifText(file.name, reader.result);
   };
   reader.readAsText(file);
 });
+
+// The record's two CIFs: the original, which the record only has as a file (downloaded
+// through the proxy), and the minimal one, whose text is in the record. The AMC header is
+// made from the original when there is one; the dropdown under the drop zone changes between them.
+const CIF_SOURCE_LABELS = { original: 'original CIF', minimal: 'minimal CIF' };
+let recordCifs = {};
+let recordCifRequest = 0;
+
+function recordFile(apiRecord, fieldName) {
+  const field = (apiRecord.fields || []).find(f => f.field_name === fieldName);
+  return field && Array.isArray(field.files) ? field.files[0] : undefined;
+}
+
+function setupRecordCifs(apiRecord) {
+  const original = recordFile(apiRecord, 'Original CIF');
+  const minimal = recordFile(apiRecord, 'Minimal CIF');
+  const minimalText = getApiField(apiRecord, 'Minimal CIF Contents');
+  recordCifs = {
+    original: original && { name: original.original_name, fileUuid: original.file_uuid },
+    minimal: (minimal || minimalText) && { name: minimal ? minimal.original_name : 'minimal.cif', fileUuid: minimal && minimal.file_uuid, text: minimalText },
+  };
+  document.querySelectorAll('#cifSource option').forEach(option => {
+    if (option.value in recordCifs) option.hidden = option.disabled = !recordCifs[option.value];
+  });
+  document.getElementById('cifSourceSwitch').hidden = !recordCifs.original && !recordCifs.minimal;
+  const first = ['original', 'minimal'].find(source => recordCifs[source]);
+  if (first) loadRecordCif(first);
+}
+
+// null for a dropped file, which the dropdown then names.
+function markCifSource(source) {
+  document.getElementById('cifSource').value = source || 'file';
+}
+
+async function loadRecordCif(source) {
+  const cif = recordCifs[source];
+  const label = CIF_SOURCE_LABELS[source];
+  const status = document.getElementById('cifToAmcStatus');
+  const request = ++recordCifRequest;
+  markCifSource(source);
+  try {
+    if (cif.text === undefined) {
+      status.textContent = `Downloading the record's ${label}...`;
+      cif.text = (await fetchCifFile(cif.fileUuid)).text;
+    }
+    // Switched again, or a file was dropped, while this one downloaded.
+    if (request !== recordCifRequest) return;
+    loadCifText(cif.name, cif.text);
+    // renderData leaves an error here if the header couldn't be built.
+    if (!status.textContent) status.textContent = `From the record's ${label} (${cif.name}).`;
+  } catch (err) {
+    if (request === recordCifRequest) status.textContent = `Error loading the record's ${label}: ${err.message}`;
+  }
+}
+
+document.getElementById('cifSource').addEventListener('change', event => loadRecordCif(event.target.value));
 
 // odrRruffCifViewer is injected by odr-rruff-cifviewer.php via
 // wp_localize_script. Records are fetched through the plugin's own REST route,
@@ -1084,10 +1162,19 @@ async function rateLimitedFetch(url, options) {
 }
 
 async function fetchAmcsdRecord(uuid) {
+  return fetchFromProxy(`${cifViewerConfig.recordProxyUrl}${encodeURIComponent(uuid)}`);
+}
+
+// One of the record's CIF files, as { text }.
+async function fetchCifFile(fileUuid) {
+  return fetchFromProxy(`${cifViewerConfig.fileProxyUrl}${encodeURIComponent(fileUuid)}`);
+}
+
+async function fetchFromProxy(url) {
   // The nonce lets WordPress recognise a logged-in admin, so the route can
   // include the detailed reason when something goes wrong.
   const headers = cifViewerConfig.restNonce ? { 'X-WP-Nonce': cifViewerConfig.restNonce } : {};
-  const res = await rateLimitedFetch(`${cifViewerConfig.recordProxyUrl}${encodeURIComponent(uuid)}`, { headers, credentials: 'same-origin' });
+  const res = await rateLimitedFetch(url, { headers, credentials: 'same-origin' });
   if (!res.ok) {
     let message = `Request failed: ${res.status} ${res.statusText}`;
     try {
@@ -1099,10 +1186,16 @@ async function fetchAmcsdRecord(uuid) {
   return res.json();
 }
 
+// The AMCSD Record section starts hidden and only shows when the record couldn't be loaded.
+function showRecordProblem(message) {
+  document.getElementById('apiStatus').textContent = message;
+  document.getElementById('apiSection').hidden = false;
+}
+
 async function fetchRecordForUuid(uuid) {
   const status = document.getElementById('apiStatus');
   if (!cifViewerConfig.recordProxyUrl) {
-    status.textContent = 'Error: the viewer is missing its server configuration.';
+    showRecordProblem('Error: the viewer is missing its server configuration.');
     return;
   }
   status.textContent = 'Fetching...';
@@ -1111,10 +1204,12 @@ async function fetchRecordForUuid(uuid) {
     status.textContent = 'Fetched successfully.';
     if (currentCifData) renderData(currentCifData);
     else renderData({ blockName: '', tags: {}, loops: [], blocks: [] });
-    // Also turn the record's AMC file into a CIF (amc2cif-ui.js, loaded after this file).
+    // Also turn the record's AMC file into a CIF (amc2cif-ui.js, loaded after this file),
+    // and its CIF into an AMC header.
     showCifFromApiRecord(currentApiRecord);
+    setupRecordCifs(currentApiRecord);
   } catch (err) {
-    status.textContent = `Error: ${err.message}`;
+    showRecordProblem(`Error: ${err.message}`);
   }
 }
 
@@ -1123,7 +1218,7 @@ const recordId = new URLSearchParams(window.location.search).get('UUID');
 if (recordId) {
   fetchRecordForUuid(recordId.trim());
 } else {
-  document.getElementById('apiStatus').textContent = 'No record UUID in URL (expected ?UUID=...).';
+  showRecordProblem('No record UUID in URL (expected ?UUID=...).');
 }
 
 function copyTextarea(id) {
