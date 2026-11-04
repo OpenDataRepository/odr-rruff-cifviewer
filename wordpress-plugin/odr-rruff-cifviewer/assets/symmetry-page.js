@@ -9,16 +9,22 @@ const config = window.odrRruffSymmetry || {};
 const INDEX_URL = config.indexUrl || '/api/symmetry';
 const RECORD_URL = config.recordUrl || '/api/symmetry/record/';
 
-// The number after a ":" in a space group name, shown as written; the detail page adds its
-// name, from data/SpaceGroupData.txt.
-const settingLabel = setting => `:${setting}`;
-const SETTING_NAMES = {
-  1: 'unique axis c',
-  2: 'unique axis b',
-  3: 'unique axis a',
-  4: 'hexagonal axes',
-  5: 'rhombohedral axes',
-};
+// The number after a ":" in a space group name (data/SpaceGroupData.txt). The monoclinic
+// settings 1, 2, 3 are shown by number with the axis their 2-fold axis is parallel to; the
+// rhombohedral groups' 4 and 5 are only our own codes, so those show just the name.
+const MONOCLINIC_AXES = { 1: 'c', 2: 'b', 3: 'a' };
+const AXES_NAMES = { 4: 'hexagonal axes', 5: 'rhombohedral axes' };
+const axisText = setting => `2-fold ∥ ${MONOCLINIC_AXES[setting]}`;
+// Plain text, for the detail page and notes: "setting 1 (2-fold ∥ c)", "hexagonal axes".
+function settingText(setting) {
+  if (MONOCLINIC_AXES[setting]) return `setting ${setting} (${axisText(setting)})`;
+  return AXES_NAMES[setting] || `setting ${setting}`;
+}
+// HTML, for the labels in the list: "<b>1</b> 2-fold ∥ c", "hexagonal".
+function settingTag(setting) {
+  if (MONOCLINIC_AXES[setting]) return `<b>${setting}</b> ${escapeHtml(axisText(setting))}`;
+  return escapeHtml((AXES_NAMES[setting] || `setting ${setting}`).replace(/ axes$/, ''));
+}
 
 const SYSTEM_LABELS = {
   triclinic: 'Triclinic',
@@ -67,7 +73,7 @@ function shiftText(value) {
   return den === 1 ? `${sign}${Math.abs(num)}` : sign + (VULGAR[frac] || frac);
 }
 
-const shiftLabel = shift => `origin shifted by (${shift.map(shiftText).join(', ')})`;
+const shiftLabel = shift => `origin shifted from the standard setting by (${shift.map(shiftText).join(', ')})`;
 
 // The page's own path with a trailing slash (/symmetry.html/?UUID=..., /symmetry/?UUID=...).
 const pagePath = location.pathname.replace(/\/?$/, '/');
@@ -116,11 +122,10 @@ function numberRow(number, groups) {
     // Origin-shifted entries go right after the symbol they shift.
     const symbols = unsorted.map(g => parseName(g.name).symbol);
     const list = unsorted.map((g, i) => [symbols.indexOf(symbols[i]), i, g]).sort((a, b) => a[0] - b[0] || a[1] - b[1]).map(e => e[2]);
-    // ":1 axis c", so each line says which setting it is; a symbol with none says so too.
-    const name = SETTING_NAMES[setting] ? SETTING_NAMES[setting].replace(/^unique /, '').replace(/ axes$/, '') : '';
+    // "1 2-fold ∥ c" or "hexagonal", so each line says which setting it is; a symbol with none says so too.
     const label = !labelled ? ''
       : setting === null ? '<span class="sg-setting">no setting</span>'
-      : `<span class="sg-setting"><b>${settingLabel(setting)}</b> ${escapeHtml(name)}</span>`;
+      : `<span class="sg-setting">${settingTag(setting)}</span>`;
     return `<div class="sg-line">${label}<span class="sg-symbols">${list.map(groupLink).join('')}</span></div>`;
   });
   return `<tr id="sg-${number}"><th scope="row">${number}</th><td>${lines.join('')}</td></tr>`;
@@ -138,15 +143,19 @@ function renderIndex(groups) {
       const rows = [...groupBy(pgList, g => g.number)].map(([number, n]) => numberRow(number, n)).join('');
       return `<h3>Point group ${symbolHtml(pointGroup)}</h3><table class="sg-rows"><tbody>${rows}</tbody></table>`;
     }).join('');
+    const note = system === 'monoclinic'
+      ? '<p class="sg-note">Each monoclinic group is listed in up to three settings, 1, 2 and 3, in which the 2-fold axis is parallel to c, b or a.</p>'
+      : '';
     return `<section class="sg-system" id="sg-system-${escapeHtml(system)}">
       <h2>${escapeHtml(SYSTEM_LABELS[system] || system)} <span class="sg-range">space groups ${range(list)}</span></h2>
+      ${note}
       ${pointGroups}
     </section>`;
   }).join('');
 
   view.innerHTML = `
     <h1>Space Group Symmetries</h1>
-    <p class="sg-intro">The space groups used in RRUFF and for the IMA minerals.</p>
+    <p class="sg-intro">The space groups used in RRUFF and for the IMA minerals. The small numbers after some symbols, such as <span class="sg-shift">0,0,¼</span>, are a translation of the origin from the standard setting.</p>
     <nav class="sg-nav">${nav}</nav>
     ${sections}`;
 
@@ -209,17 +218,17 @@ function renderDetail(record, groups) {
     ['Crystal system', escapeHtml(SYSTEM_LABELS[system] || system)],
     ['Point group', symbolHtml(f.PointGroup || '')],
     ['Lattice', escapeHtml(f.Lattice || '')],
-    ['Setting', setting ? settingLabel(setting) + (SETTING_NAMES[setting] ? ` (${SETTING_NAMES[setting]})` : '') : ''],
+    ['Setting', setting ? escapeHtml(settingText(setting).replace(/^setting /, '').replace(/^./, c => c.toUpperCase())) : ''],
     ['Origin', shift ? escapeHtml(shiftLabel(shift)) : ''],
     ['Name in the database', escapeHtml(name)],
   ].filter(([, v]) => v !== '').map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('');
 
   const others = (groups || []).filter(g => g.number === number && g.uuid !== record.record_uuid).sort(byNumber);
   const othersHtml = others.length ? `<section class="sg-others">
-      <h2>Other symbols for space group ${number}</h2>
+      <h2>Other symbols or settings for space group ${number}</h2>
       <div class="sg-symbols">${others.map(g => {
         const p = parseName(g.name);
-        const note = [p.setting && settingLabel(p.setting), p.shift && shiftLabel(p.shift)].filter(Boolean).join(', ');
+        const note = [p.setting && settingText(p.setting), p.shift && shiftLabel(p.shift)].filter(Boolean).join(', ');
         return `<a class="sg-link" href="${escapeHtml(detailUrl(g.uuid))}"><span>${symbolHtml(p.symbol)}</span>${note ? `<span class="sg-shift">${escapeHtml(note)}</span>` : ''}</a>`;
       }).join('')}</div>
     </section>` : '';
@@ -234,6 +243,16 @@ function renderDetail(record, groups) {
     ${operatorTable('Generators', '(x,y,z) form', f['Generator XYZs'], f['Generator Ms'], true)}
     ${operatorTable('Symmetry operators', '(x,y,z) form', f.SymmetryOpXYZs, f.SymmetryOpMs, false)}
     ${operatorTable('Reciprocal space operators', '(h,k,l) form', f.SymmetryOphkl, f.ReciprocalSymmetryOpM, false)}`;
+  alignColumns();
+}
+
+// Give each column of the operator tables the width of its widest one, so the column lines
+// match from table to table.
+function alignColumns() {
+  const heads = [...view.querySelectorAll('.sg-op-table thead tr')].map(tr => [...tr.children]);
+  for (const row of heads) for (const th of row) th.style.removeProperty('width');
+  const widths = [0, 1, 2].map(i => Math.max(...heads.map(row => row[i] ? row[i].getBoundingClientRect().width : 0)));
+  for (const row of heads) row.forEach((th, i) => th.style.setProperty('width', `${Math.ceil(widths[i])}px`, 'important'));
 }
 
 async function init() {
