@@ -124,6 +124,12 @@
   border-bottom: 1px solid var(--s-border);
 }
 
+#symmetryView .sg-note {
+  font-size: 0.85rem;
+  color: var(--s-muted);
+  margin: 0 0 0.25rem;
+}
+
 #symmetryView .sg-range {
   font-size: 0.85rem;
   font-weight: normal;
@@ -131,9 +137,19 @@
   margin-left: 0.4rem;
 }
 
-/* Overbar for -1, -3, -4, -6 */
+/* Overbar for -1, -3, -4, -6, drawn just above the digit; a text overline sits up at the top of
+   the font's line box, too far from it. */
 #symmetryView .sg-bar {
-  text-decoration: overline;
+  position: relative;
+}
+
+#symmetryView .sg-bar::before {
+  content: '';
+  position: absolute;
+  left: 0.04em;
+  right: 0.04em;
+  top: 0.18em;
+  border-top: max(1px, 0.06em) solid currentColor;
 }
 
 #symmetryView sub {
@@ -293,7 +309,7 @@
   margin: 0;
 }
 
-/* A faint line under "Other symbols for space group N", like the lines in the title box. */
+/* A faint line under "Other symbols or settings for space group N", like the lines in the title box. */
 #symmetryView .sg-others h2 {
   padding-bottom: 0.5rem;
   border-bottom: 1px solid var(--s-chip-border);
@@ -303,16 +319,31 @@
   margin-top: 0.85rem;
 }
 
+/* The operator cards and tables are only as wide as their contents, centered. The widths and
+   padding are !important so a WordPress theme's table styles can't stretch them. */
+#symmetryView .sg-ops {
+  width: fit-content;
+  max-width: 100%;
+  box-sizing: border-box;
+  margin-left: auto;
+  margin-right: auto;
+}
+
 #symmetryView .sg-op-table {
-  border-collapse: collapse;
-  width: 100%;
+  border-collapse: collapse !important;
+  width: auto !important;
+  min-width: 0 !important;
+  table-layout: auto !important;
+  margin: 0 auto !important;
   background: var(--s-bg);
 }
 
 #symmetryView .sg-op-table th,
 #symmetryView .sg-op-table > tbody > tr > td {
-  border: 1px solid var(--s-border);
-  padding: 0.35rem 0.9rem;
+  border: 1px solid var(--s-border) !important;
+  padding: 0.3rem 0.6rem !important;
+  width: auto !important; /* the page script sets the header widths so all three tables line up */
+  box-sizing: border-box;
   text-align: center;
   vertical-align: middle;
 }
@@ -338,16 +369,16 @@
   border-left: 1.5px solid currentColor;
   border-right: 1.5px solid currentColor;
   border-radius: 10px;
-  width: auto;
-  margin: 0 auto;
+  width: auto !important;
+  margin: 0 auto !important;
   padding: 0.1rem 0.35rem;
   font-family: ui-monospace, Consolas, monospace;
   font-size: 0.85rem;
 }
 
 #symmetryView .sg-matrix td {
-  border: 0;
-  padding: 0 0.4rem;
+  border: 0 !important;
+  padding: 0 0.35rem !important;
   line-height: 1.5;
   text-align: right;
 }
