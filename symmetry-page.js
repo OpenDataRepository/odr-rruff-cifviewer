@@ -37,6 +37,16 @@ const SYSTEM_LABELS = {
 
 const view = document.getElementById('symmetryView');
 
+// An ODR search of AMCSD for one space group symbol: the search key is JSON of the AMCSD
+// space group field (7204) and the database's datatype (771), base64url-encoded the way ODR
+// does it, after the search stub. The "0" in the stub uses the database's default theme.
+const AMCSD_SEARCH_URL = 'https://www.rruff.net/odr/amcsd#/odr/search/display/0/';
+function b64EncodeUnicode(str) {
+  return btoa(encodeURIComponent(str).replace(/%([0-9A-F]{2})/g, (m, p1) => String.fromCharCode(parseInt(p1, 16))))
+    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+const amcsdSearchUrl = symbol => AMCSD_SEARCH_URL + b64EncodeUnicode(JSON.stringify({ 7204: symbol, dt_id: '771' }));
+
 const escapeHtml = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 // Split a name such as "*I2/a:2[.25,0,.25]" into its symbol, setting and origin shift.
@@ -144,7 +154,7 @@ function renderIndex(groups) {
       return `<h3>Point group ${symbolHtml(pointGroup)}</h3><table class="sg-rows"><tbody>${rows}</tbody></table>`;
     }).join('');
     const note = system === 'monoclinic'
-      ? '<p class="sg-note">Each monoclinic group is listed in up to three settings, 1, 2 and 3, in which the 2-fold axis is parallel to c, b or a.</p>'
+      ? '<p class="sg-note">Each monoclinic space group is listed in three settings, 1, 2 and 3, where the symmetry axis is parallel to c, b or a, respectively.</p>'
       : '';
     return `<section class="sg-system" id="sg-system-${escapeHtml(system)}">
       <h2>${escapeHtml(SYSTEM_LABELS[system] || system)} <span class="sg-range">space groups ${range(list)}</span></h2>
@@ -242,7 +252,11 @@ function renderDetail(record, groups) {
     ${othersHtml}
     ${operatorTable('Generators', '(x,y,z) form', f['Generator XYZs'], f['Generator Ms'], true)}
     ${operatorTable('Symmetry operators', '(x,y,z) form', f.SymmetryOpXYZs, f.SymmetryOpMs, false)}
-    ${operatorTable('Reciprocal space operators', '(h,k,l) form', f.SymmetryOphkl, f.ReciprocalSymmetryOpM, false)}`;
+    ${operatorTable('Reciprocal space operators', '(h,k,l) form', f.SymmetryOphkl, f.ReciprocalSymmetryOpM, false)}
+    <section class="sg-amcsd">
+      <h2>AMCSD datasets</h2>
+      <a class="sg-link" href="${escapeHtml(amcsdSearchUrl(symbol))}" target="_blank" rel="noopener">All AMCSD datasets with space group&nbsp;<span>${symbolHtml(symbol)}</span>&nbsp;&#8599;</a>
+    </section>`;
   alignColumns();
 }
 

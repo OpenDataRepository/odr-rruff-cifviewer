@@ -247,6 +247,23 @@ function sanitizeCitationText(text) {
   return stripDiacritics(convertCitationMarkup(text));
 }
 
+// AMC and CIF files may only contain plain ASCII. Accented letters lose their
+// accents ("Bačík" -> "Bacik"), a few common symbols get an ASCII stand-in,
+// and anything else outside ASCII is dropped.
+const ASCII_REPLACEMENTS = {
+  'ß': 'ss', 'æ': 'ae', 'Æ': 'AE', 'œ': 'oe', 'Œ': 'OE', 'ø': 'o', 'Ø': 'O',
+  'ł': 'l', 'Ł': 'L', 'đ': 'd', 'Đ': 'D', 'ð': 'd', 'Ð': 'D', 'þ': 'th', 'Þ': 'Th', 'ı': 'i',
+  '‐': '-', '‑': '-', '‒': '-', '–': '-', '—': '-', '−': '-',
+  '‘': "'", '’': "'", '‚': "'", '′': "'", '“': '"', '”': '"', '„': '"', '″': '"',
+  '·': '*', '×': 'x', '…': '...', '◻': '[]', '□': '[]', 'µ': 'u', 'μ': 'u',
+  ' ': ' ', ' ': ' ', ' ': ' ', '°': '',
+};
+
+function toAscii(text) {
+  return stripDiacritics(text)
+    .replace(/[^\x00-\x7F]/g, ch => ASCII_REPLACEMENTS[ch] ?? '');
+}
+
 function getCitationField(apiRecord, fieldName) {
   const citationRecord = findRecordByDatabaseUuid(apiRecord, CITATION_DATABASE_UUID);
   const value = getApiField(citationRecord, fieldName);
@@ -269,7 +286,9 @@ function formatAuthors(data, apiRecord) {
     .join(', ');
   // The API record is whatever was fetched first and deliberately looked up, so it
   // takes priority over the CIF's own (often unfilled/boilerplate) header fields.
-  return getApiField(apiRecord, 'Authors') || fromCif || '';
+  // Newer records can leave the record's own Authors field empty; the record's
+  // citation (Bibliography) entry still lists them.
+  return getApiField(apiRecord, 'Authors') || getCitationField(apiRecord, 'Authors') || fromCif || '';
 }
 
 // AMCSD file names are conventionally "MineralName__<id>.cif" (sometimes with an
@@ -493,12 +512,12 @@ function buildAmcHeader(data, apiRecord, fileName) {
   // title, locality, database code, cell params) at 80 characters - the atom table
   // appended below is fixed-width columnar data and must never be wrapped, or its
   // columns stop lining up.
-  const wrappedLines = lines.flatMap(line => wrapText(line, 80));
+  const wrappedLines = lines.flatMap(line => wrapText(toAscii(line), 80));
 
   const atomDatasetsOutput = buildAtomDatasetsOutput(data);
   if (atomDatasetsOutput) wrappedLines.push(atomDatasetsOutput);
 
-  return wrappedLines.join('\n');
+  return toAscii(wrappedLines.join('\n'));
 }
 
 const ATOM_SITE_TAGS = ['_atom_site_label', '_atom_site_fract_x', '_atom_site_fract_y', '_atom_site_fract_z'];
@@ -1334,7 +1353,7 @@ function formatCitationBlock(citation) {
   lines.push(parsed.title);
   if (parsed.localityLine) lines.push(parsed.localityLine);
   // Same line-wrapping method as the AMC header: word-wrap every line at 80 chars.
-  return lines.flatMap(line => wrapText(line, 80)).join('\n');
+  return lines.flatMap(line => wrapText(toAscii(line), 80)).join('\n');
 }
 
 document.getElementById('formatCitationBtn').addEventListener('click', () => {

@@ -9,6 +9,9 @@
   --s-chip-border: #c9dcf0;
   --s-chip-hover: #e6f1fb;
   --s-error: #b42318;
+  /* Room under the site's header bar and in from the screen edges; a WordPress page puts the
+     view right against both. */
+  padding: 1.5rem 1.25rem 1rem;
 }
 
 #symmetryView h1 {
@@ -84,7 +87,8 @@
 /* The detail page's sections, in the same light blue cards as the converter. */
 #symmetryView .sg-about,
 #symmetryView .sg-ops,
-#symmetryView .sg-others {
+#symmetryView .sg-others,
+#symmetryView .sg-amcsd {
   background: #f1f6fb;
   border-radius: 28px;
   padding: 1.25rem 1.75rem 1.5rem;
@@ -107,7 +111,8 @@
 }
 
 #symmetryView .sg-ops h2,
-#symmetryView .sg-others h2 {
+#symmetryView .sg-others h2,
+#symmetryView .sg-amcsd h2 {
   font-size: 1.46rem;
   margin-top: 0;
 }
@@ -321,7 +326,9 @@
 
 /* The operator cards and tables are only as wide as their contents, centered. The widths and
    padding are !important so a WordPress theme's table styles can't stretch them. */
-#symmetryView .sg-ops {
+#symmetryView .sg-ops,
+#symmetryView .sg-amcsd,
+#symmetryView .sg-others {
   width: fit-content;
   max-width: 100%;
   box-sizing: border-box;
