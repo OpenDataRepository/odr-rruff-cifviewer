@@ -9,7 +9,7 @@ function showCifFromAmc(fileName, text, doneMessage = '') {
   const status = document.getElementById('amcToCifStatus');
   const output = document.getElementById('amcToCifOutput');
   try {
-    output.value = buildCifFromAmc(text);
+    output.value = toAscii(buildCifFromAmc(text));
     status.textContent = doneMessage;
   } catch (err) {
     output.value = '';
