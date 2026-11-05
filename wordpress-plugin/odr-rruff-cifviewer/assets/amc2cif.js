@@ -425,8 +425,15 @@ function expandTabs(line) {
   });
 }
 
+// An atom row: a label, then x y z and any further columns, all numbers.
+function isAmcAtomRow(line) {
+  const tokens = line.trim().split(/\s+/);
+  return tokens.length >= 4 && tokens.slice(1).every(t => AMC_NUMBER_RE.test(t));
+}
+
 // Parses one dataset's atom table (the header row plus every following row up
-// to a blank line, "END", the next cell-parameter line, or end of input).
+// to "END", the next cell-parameter line, or end of input). A blank line ends
+// it too, unless more atom rows follow it (a stray blank line inside the table).
 function parseAmcAtomTable(lines, startIndex) {
   const headerLine = lines[startIndex] === undefined ? undefined : expandTabs(lines[startIndex]);
   if (headerLine === undefined) return { columns: [], rows: [], nextIndex: startIndex };
@@ -438,7 +445,16 @@ function parseAmcAtomTable(lines, startIndex) {
   while (i < lines.length) {
     const line = expandTabs(lines[i]);
     const trimmed = line.trim();
-    if (trimmed === '' || /^END$/i.test(trimmed) || isAmcCellLine(line)) break;
+    if (trimmed === '') {
+      let next = i + 1;
+      while (next < lines.length && lines[next].trim() === '') next++;
+      if (next < lines.length && isAmcAtomRow(lines[next]) && !isAmcCellLine(lines[next])) {
+        i = next;
+        continue;
+      }
+      break;
+    }
+    if (/^END$/i.test(trimmed) || isAmcCellLine(line)) break;
     const cells = readAtomRow(line, headerTokens);
     rows.push({ label: cells[0], values: cells.slice(1) });
     i++;
