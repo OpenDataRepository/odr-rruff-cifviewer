@@ -364,10 +364,10 @@ function betaToU(betas, aStar, bStar, cStar) {
 
 // "American Mineralogist 99 (2014) 276-282" -> journal/volume/year/pages.
 function parseAmcJournalLine(line) {
-  const m = line.trim().match(/^(.+?)\s+(\S+)\s*\((\d{4})\)\s*(\S+)?\s*$/);
+  const m = normalizeMinusSigns(line).trim().match(/^(.+?)\s+(\S+)\s*\((\d{4})\)\s*(\S+)?\s*$/);
   if (!m) return { journal: line.trim(), volume: '', year: '', pageFirst: '', pageLast: '' };
   const [, journal, volume, year, pages] = m;
-  const [pageFirst, pageLast] = (pages || '').split(/[-–]/);
+  const [pageFirst, pageLast] = (pages || '').split('-');
   return { journal, volume, year, pageFirst: pageFirst || '', pageLast: pageLast || '' };
 }
 
@@ -473,7 +473,7 @@ function isAtomTableHeaderLine(line) {
 }
 
 function parseAmcText(text) {
-  const lines = text.replace(/\r\n/g, '\n').split('\n');
+  const lines = normalizeMinusSigns(text).replace(/\r\n/g, '\n').split('\n');
   const firstCellIndex = lines.findIndex(isAmcCellLine);
   if (firstCellIndex === -1) throw new Error('No cell-parameter line (a b c alpha beta gamma spacegroup) found.');
 

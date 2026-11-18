@@ -78,7 +78,7 @@ function shiftText(value) {
     num = Math.round(x * den);
   }
   if (!num) return '0';
-  const sign = num < 0 ? '−' : '';
+  const sign = num < 0 ? '-' : '';
   const frac = `${Math.abs(num)}/${den}`;
   return den === 1 ? `${sign}${Math.abs(num)}` : sign + (VULGAR[frac] || frac);
 }
@@ -144,7 +144,7 @@ function numberRow(number, groups) {
 function renderIndex(groups) {
   const sorted = [...groups].sort(byNumber);
   const systems = groupBy(sorted, g => g.system);
-  const range = list => { const numbers = list.map(g => g.number); return `${Math.min(...numbers)}–${Math.max(...numbers)}`; };
+  const range = list => { const numbers = list.map(g => g.number); return `${Math.min(...numbers)}-${Math.max(...numbers)}`; };
   // Each system as a pill with its space group numbers.
   const nav = [...systems].map(([s, list]) => `<a class="sg-nav-pill" href="#sg-system-${escapeHtml(s)}">${escapeHtml(SYSTEM_LABELS[s] || s)}<span class="sg-nav-range">${range(list)}</span></a>`).join('');
 
@@ -191,11 +191,11 @@ function lines(value) {
 // A matrix line: rows split by tabs, entries by spaces ("1 0 0 1/2\t0 1 0 0\t0 0 1 0").
 function matrixHtml(text) {
   const rows = text.split('\t').map(r => r.trim().split(/\s+/)).filter(r => r[0] !== '');
-  const body = rows.map(r => `<tr>${r.map(v => `<td>${escapeHtml(v.replace(/^-/, '−'))}</td>`).join('')}</tr>`).join('');
+  const body = rows.map(r => `<tr>${r.map(v => `<td>${escapeHtml(v)}</td>`).join('')}</tr>`).join('');
   return `<table class="sg-matrix"><tbody>${body}</tbody></table>`;
 }
 
-const opText = text => escapeHtml(text.replace(/,/g, ', ').replace(/-/g, '−'));
+const opText = text => escapeHtml(text.replace(/,/g, ', '));
 
 // A table of operators: the text form beside the matrix form, matched by line.
 function operatorTable(title, formLabel, texts, matrices, withOrder) {

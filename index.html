@@ -58,9 +58,30 @@
         </label>
         <div id="amcToCifStatus"></div>
         <button id="copyAmcToCifBtn">Copy</button>
-        <button id="sendAmcToCifBtn" hidden>Send</button>
         <textarea id="amcToCifOutput" readonly rows="1"></textarea>
-        <div id="sendAmcToCifStatus" hidden></div>
+        <button id="sendAmcToCifBtn" disabled>Send</button>
+        <div id="sendAmcToCifStatus"></div>
+      </div>
+
+      <div id="tableToAmcSection">
+        <h3>Paper Table &rarr; AMC</h3>
+        <p>Paste an atom table copied from a paper, header row included. It can hold several datasets, each under its own title line (e.g. Phl1a), and a separate U(i,j) table after it.</p>
+        <div class="table-scales">
+          <label>Coordinates &times; 10^<input type="number" id="tableXyzPower" value="4" min="0" max="9"></label>
+          <label>Isotropic &times; 10^<input type="number" id="tableIsoPower" value="3" min="0" max="9"></label>
+          <label>Anisotropic &times; 10^<input type="number" id="tableAnisoPower" value="3" min="0" max="9"></label>
+          <label><input type="checkbox" id="tableHexagonal"> Hexagonal or rhombohedral cell (when no cell is given)</label>
+        </div>
+        <label class="table-field" for="tableInput">Atom table</label>
+        <textarea id="tableInput" rows="8" spellcheck="false"></textarea>
+        <label class="table-field" for="tableCellInput">Cell parameters (optional): one line per dataset, e.g. <code>Phl1a 5.306(1) 9.195(3) 10.272(3) 90 100.01(2) 90 C2/m</code>. Four numbers are a b c beta; a line with only a space group sets it for all.</label>
+        <textarea id="tableCellInput" rows="3" spellcheck="false"></textarea>
+        <label class="table-field" for="tableHeaderInput">AMC header (optional): mineral, authors, journal and title, put in front of every dataset</label>
+        <textarea id="tableHeaderInput" rows="3" spellcheck="false"></textarea>
+        <div id="tableToAmcStatus"></div>
+        <button id="copyTableToAmcBtn">Copy</button>
+        <button id="downloadTableToAmcBtn">Download</button>
+        <textarea id="tableToAmcOutput" readonly rows="1"></textarea>
       </div>
 
       <div id="unitCellSection" hidden>
@@ -125,6 +146,7 @@
   <script src="app.js"></script>
   <script src="amc2cif.js"></script>
   <script src="amc2cif-ui.js"></script>
+  <script src="table2amc.js"></script>
   <script src="metrics-page.js"></script>
 </body>
 </html>

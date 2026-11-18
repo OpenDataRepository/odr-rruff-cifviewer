@@ -2,7 +2,7 @@
 /**
  * Plugin Name: ODR RRUFF CIF Viewer
  * Description: Reads a CIF and creates the AMC header
- * Version: 1.0.12
+ * Version: 1.0.13
  * Author: Nathan
  */
 
@@ -10,11 +10,17 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'CIF_VIEWER_VERSION', '1.0.12' );
+define( 'CIF_VIEWER_VERSION', '1.0.13' );
 define( 'CIF_VIEWER_URL', plugin_dir_url( __FILE__ ) );
 define( 'CIF_VIEWER_TOKEN_URL', 'https://www.rruff.net/odr_rruff/api/v4/token' );
 define( 'CIF_VIEWER_RECORD_URL', 'https://www.rruff.net/odr_rruff/api/v4/dataset/record/' );
 define( 'CIF_VIEWER_FILE_URL', 'https://www.rruff.net/odr_rruff/api/v4/file/' );
+// POST <base>/record/<record_uuid>/<field_uuid>/value sets a text field.
+define( 'CIF_VIEWER_API_BASE', 'https://www.rruff.net/odr_rruff/api/v4' );
+// POST /file uploads a file into a record's file field (multipart form).
+define( 'CIF_VIEWER_UPLOAD_URL', 'https://www.rruff.net/odr_rruff/api/v4/file' );
+// GET template/<database_uuid> lists every field of a database, including empty ones a record leaves out.
+define( 'CIF_VIEWER_TEMPLATE_URL', 'https://www.rruff.net/odr_rruff/api/v4/template/' );
 // The ODR symmetry database the [odr_rruff_symmetry] page lists, and its every
 // record UUID (a limit of 0 returns all of them).
 define( 'CIF_VIEWER_SYMMETRY_DATABASE_UUID', 'e1caf946bba4b04aa57262848214' );
@@ -101,7 +107,8 @@ function cif_viewer_dotenv() {
 
 // Exchanges the .env credentials for an ODR API token server-to-server, so the
 // secret never reaches the browser. The token is cached until shortly before
-// it expires so page views don't each hit the token endpoint.
+// it expires so page views don't each hit the token endpoint. The same account
+// looks records up and sends minimal CIFs, so it needs edit rights on AMCSD.
 function cif_viewer_generate_token() {
 	$cached = get_transient( 'cif_viewer_api_token_cache' );
 	if ( $cached ) {
@@ -142,7 +149,7 @@ function cif_viewer_generate_token() {
 	}
 
 	$data  = json_decode( $body, true );
-	$token = is_array( $data ) ? ( $data['token'] ?? $data['access_token'] ?? $data['jwt'] ?? '' ) : trim( $body );
+	$token = is_array( $data ) ? ( $data['token']['value'] ?? $data['token'] ?? $data['access_token'] ?? $data['jwt'] ?? '' ) : trim( $body );
 	if ( ! is_string( $token ) || '' === $token ) {
 		cif_viewer_token_error( 'token response did not include a token' );
 		return '';
@@ -405,6 +412,204 @@ function cif_viewer_rest_symmetry_record( WP_REST_Request $request ) {
 	return rest_ensure_response( $data );
 }
 
+// Sends a CIF made in AMC -> CIF to the record, replacing what is there, for admins only: as a
+// file in the Minimal CIF field (Mineral__minimal__<code>.cif; ODR's renamer may rename it) and
+// as text in the Minimal CIF Contents field. The record is looked up first for the field UUIDs;
+// a field with no value is left out of the record, so then it comes from the database's
+// template. The file goes first: an old minimal CIF file still there afterwards is only deleted
+// once the new one is in the field, so a failed upload changes nothing. The text ODR stores is
+// checked against what was sent.
+function cif_viewer_rest_minimal_cif( WP_REST_Request $request ) {
+	$record_uuid = (string) $request->get_param( 'recordUuid' );
+	$text        = (string) $request->get_param( 'text' );
+	if ( ! preg_match( '/^[0-9a-fA-F]{1,64}$/', $record_uuid ) ) {
+		return cif_viewer_rest_error( 'Missing or invalid record UUID.', '', 400 );
+	}
+	if ( '' === trim( $text ) ) {
+		return cif_viewer_rest_error( 'There is no CIF to send.', '', 400 );
+	}
+	if ( strlen( $text ) > 2 * MB_IN_BYTES ) {
+		return cif_viewer_rest_error( 'The CIF is too large to send.', '', 413 );
+	}
+
+	$record = cif_viewer_api_get( CIF_VIEWER_RECORD_URL . rawurlencode( $record_uuid ) );
+	if ( is_wp_error( $record ) ) {
+		return $record;
+	}
+	$template   = null;
+	$file_field = cif_viewer_minimal_cif_field( $record, 'Minimal CIF', $template );
+	if ( is_wp_error( $file_field ) ) {
+		return $file_field;
+	}
+	$text_field = cif_viewer_minimal_cif_field( $record, 'Minimal CIF Contents', $template );
+	if ( is_wp_error( $text_field ) ) {
+		return $text_field;
+	}
+
+	list( $token, $token_source ) = cif_viewer_api_token();
+	if ( '' === $token ) {
+		return cif_viewer_rest_error( 'The server could not get an API token.', cif_viewer_token_error(), 500 );
+	}
+
+	// The file.
+	$name_part = function ( $name ) use ( $record ) {
+		foreach ( isset( $record['fields'] ) ? $record['fields'] : array() as $f ) {
+			if ( $name === $f['field_name'] && isset( $f['value'] ) && is_string( $f['value'] ) ) {
+				return preg_replace( '/[^\w.-]+/', '_', $f['value'] );
+			}
+		}
+		return '';
+	};
+	$file_name = implode( '__', array_filter( array( $name_part( 'Mineral' ), 'minimal', $name_part( 'database_code_amcsd' ) ) ) ) . '.cif';
+	$dotenv    = cif_viewer_dotenv();
+	$email     = isset( $dotenv['user_email'] ) ? $dotenv['user_email'] : ( isset( $dotenv['username'] ) ? $dotenv['username'] : '' );
+	$form      = array(
+		'name'                => $file_name,
+		'dataset_uuid'        => isset( $record['database_uuid'] ) ? $record['database_uuid'] : '',
+		'template_field_uuid' => isset( $file_field['template_field_uuid'] ) ? (string) $file_field['template_field_uuid'] : '',
+		'user_email'          => $email,
+		'field_uuid'          => $file_field['field_uuid'],
+		'record_uuid'         => $record_uuid,
+	);
+	$boundary  = 'cifviewer' . wp_generate_password( 24, false );
+	$body      = '';
+	foreach ( $form as $key => $value ) {
+		$body .= "--$boundary\r\nContent-Disposition: form-data; name=\"$key\"\r\n\r\n$value\r\n";
+	}
+	$body .= "--$boundary\r\nContent-Disposition: form-data; name=\"file\"; filename=\"$file_name\"\r\nContent-Type: chemical/x-cif\r\n\r\n$text\r\n--$boundary--\r\n";
+
+	$updated = cif_viewer_api_write(
+		CIF_VIEWER_UPLOAD_URL,
+		'POST',
+		array( 'Content-Type' => 'multipart/form-data; boundary=' . $boundary ),
+		$body,
+		$token,
+		$token_source
+	);
+	if ( is_wp_error( $updated ) ) {
+		return $updated;
+	}
+	$old_uuids = array_column( isset( $file_field['files'] ) ? $file_field['files'] : array(), 'file_uuid' );
+	$after     = cif_viewer_field_files( $updated, $file_field['field_uuid'] );
+	if ( ! array_diff( array_column( $after, 'file_uuid' ), $old_uuids ) ) {
+		return cif_viewer_rest_error( 'The upload went through, but the new file is not in the Minimal CIF field, so nothing else was changed.', '', 502 );
+	}
+	$removed = 0;
+	foreach ( $after as $old ) {
+		if ( ! in_array( $old['file_uuid'], $old_uuids, true ) ) {
+			continue;
+		}
+		$deleted = cif_viewer_api_write( CIF_VIEWER_FILE_URL . rawurlencode( $old['file_uuid'] ), 'DELETE', array(), null, $token, $token_source );
+		if ( is_wp_error( $deleted ) ) {
+			return cif_viewer_rest_error( 'The new file was uploaded, but the old minimal CIF (' . $old['original_name'] . ') could not be deleted.', $deleted->get_error_message(), 502 );
+		}
+		$updated = $deleted;
+		$removed++;
+	}
+	cif_viewer_allow_cif_files( $updated );
+
+	// The text.
+	$replaced = $removed > 0 || ! empty( $old_uuids ) || ( isset( $text_field['value'] ) && is_string( $text_field['value'] ) && '' !== trim( $text_field['value'] ) );
+	$updated  = cif_viewer_api_write(
+		CIF_VIEWER_API_BASE . '/record/' . rawurlencode( $record_uuid ) . '/' . rawurlencode( $text_field['field_uuid'] ) . '/value',
+		'POST',
+		array( 'Content-Type' => 'application/json' ),
+		wp_json_encode( array( 'value' => $text ) ),
+		$token,
+		$token_source
+	);
+	if ( is_wp_error( $updated ) ) {
+		return cif_viewer_rest_error( 'The file was sent, but writing the Minimal CIF Contents failed.', $updated->get_error_message(), 502 );
+	}
+	$stored = null;
+	foreach ( isset( $updated['fields'] ) ? $updated['fields'] : array() as $f ) {
+		if ( $f['field_uuid'] === $text_field['field_uuid'] ) {
+			$stored = isset( $f['value'] ) ? (string) $f['value'] : '';
+		}
+	}
+	$normalize = function ( $v ) {
+		return trim( str_replace( "\r\n", "\n", (string) $v ) );
+	};
+	if ( null === $stored || $normalize( $stored ) !== $normalize( $text ) ) {
+		return cif_viewer_rest_error( 'The file was sent, but the Minimal CIF Contents ODR stored is not the CIF that was sent.', '', 502 );
+	}
+	return rest_ensure_response(
+		array(
+			'replaced' => $replaced,
+			'fileName' => $file_name,
+			'removed'  => $removed,
+			'length'   => strlen( $text ),
+		)
+	);
+}
+
+// A field of the record by name, or from the database's template (fetched once into $template)
+// when the record leaves it out for having no value.
+function cif_viewer_minimal_cif_field( $record, $name, &$template ) {
+	foreach ( isset( $record['fields'] ) ? $record['fields'] : array() as $f ) {
+		if ( $name === $f['field_name'] ) {
+			return $f;
+		}
+	}
+	if ( null === $template ) {
+		$template = cif_viewer_api_get( CIF_VIEWER_TEMPLATE_URL . rawurlencode( isset( $record['database_uuid'] ) ? $record['database_uuid'] : '' ) );
+	}
+	if ( is_wp_error( $template ) ) {
+		return $template;
+	}
+	foreach ( isset( $template['fields'] ) ? $template['fields'] : array() as $f ) {
+		if ( $name === $f['name'] ) {
+			return array( 'field_uuid' => $f['field_uuid'], 'template_field_uuid' => $f['template_field_uuid'], 'files' => array() );
+		}
+	}
+	return cif_viewer_rest_error( "That record's database has no " . $name . ' field.', '', 400 );
+}
+
+// The files in one field of a record.
+function cif_viewer_field_files( $record, $field_uuid ) {
+	foreach ( isset( $record['fields'] ) ? $record['fields'] : array() as $f ) {
+		if ( $field_uuid === $f['field_uuid'] ) {
+			return isset( $f['files'] ) ? $f['files'] : array();
+		}
+	}
+	return array();
+}
+
+// Sends a write to the API with the account's token and decodes the record it answers
+// with, or returns a WP_Error that includes the start of ODR's reply.
+function cif_viewer_api_write( $url, $method, $headers, $body, $token, $token_source ) {
+	$args = array(
+		'method'  => $method,
+		'headers' => array_merge( array( 'Authorization' => 'Bearer ' . $token ), $headers ),
+		'timeout' => 30,
+	);
+	if ( null !== $body ) {
+		$args['body'] = $body;
+	}
+	$res = wp_remote_request( $url, $args );
+	if ( is_wp_error( $res ) ) {
+		return cif_viewer_rest_error( 'The request to the API failed.', $res->get_error_message(), 502 );
+	}
+	$code = wp_remote_retrieve_response_code( $res );
+	$request = $method . ' ' . preg_replace( '#^.*/api/v4#', '', (string) wp_parse_url( $url, PHP_URL_PATH ) );
+	if ( 401 === $code ) {
+		delete_transient( 'cif_viewer_api_token_cache' );
+		return cif_viewer_rest_error( $request . ' failed: 401 - the API rejected the token.', 'token came from the ' . $token_source, 401 );
+	}
+	if ( 403 === $code ) {
+		// The login worked but the account may not do this (e.g. no edit rights on the database).
+		return cif_viewer_rest_error( $request . " failed: 403 - the API account isn't allowed to do this (it needs edit rights on AMCSD).", substr( wp_remote_retrieve_body( $res ), 0, 300 ), 403 );
+	}
+	if ( $code < 200 || $code >= 300 ) {
+		return cif_viewer_rest_error( 'Request failed: ' . $code . '.', substr( wp_remote_retrieve_body( $res ), 0, 300 ), 502 );
+	}
+	$data = json_decode( wp_remote_retrieve_body( $res ), true );
+	if ( ! is_array( $data ) ) {
+		return cif_viewer_rest_error( 'The API reply was not a record.', '', 502 );
+	}
+	return $data;
+}
+
 function cif_viewer_register_rest_routes() {
 	register_rest_route(
 		'odr-rruff-cifviewer/v1',
@@ -425,6 +630,18 @@ function cif_viewer_register_rest_routes() {
 			'callback'            => 'cif_viewer_rest_file',
 			// Public too; cif_viewer_rest_file only serves the CIFs of records looked up.
 			'permission_callback' => '__return_true',
+		)
+	);
+	register_rest_route(
+		'odr-rruff-cifviewer/v1',
+		'/minimal-cif',
+		array(
+			'methods'             => 'POST',
+			'callback'            => 'cif_viewer_rest_minimal_cif',
+			// Writes to the database, so only admins (the REST nonce identifies them).
+			'permission_callback' => function () {
+				return current_user_can( 'manage_options' );
+			},
 		)
 	);
 	register_rest_route(
@@ -505,6 +722,7 @@ function cif_viewer_register_assets() {
 	wp_register_script( 'cif-viewer-app', CIF_VIEWER_URL . 'assets/app.js', array( 'cif-viewer-spacegroups', 'cif-viewer-submit', 'cif-viewer-symmetry', 'cif-viewer-spacegroupdata', 'cif-viewer-unitcell' ), cif_viewer_asset_version( 'assets/app.js' ), true );
 	wp_register_script( 'cif-viewer-amc2cif', CIF_VIEWER_URL . 'assets/amc2cif.js', array( 'cif-viewer-spacegroups', 'cif-viewer-symmetry', 'cif-viewer-spacegroupdata', 'cif-viewer-unitcell' ), cif_viewer_asset_version( 'assets/amc2cif.js' ), true );
 	wp_register_script( 'cif-viewer-amc2cif-ui', CIF_VIEWER_URL . 'assets/amc2cif-ui.js', array( 'cif-viewer-app', 'cif-viewer-amc2cif' ), cif_viewer_asset_version( 'assets/amc2cif-ui.js' ), true );
+	wp_register_script( 'cif-viewer-table2amc', CIF_VIEWER_URL . 'assets/table2amc.js', array( 'cif-viewer-app', 'cif-viewer-amc2cif' ), cif_viewer_asset_version( 'assets/table2amc.js' ), true );
 	wp_register_style( 'cif-viewer-metrics', CIF_VIEWER_URL . 'assets/metrics.css', array( 'cif-viewer-style' ), cif_viewer_asset_version( 'assets/metrics.css' ) );
 	wp_register_script( 'cif-viewer-metrics', CIF_VIEWER_URL . 'assets/metrics-page.js', array( 'cif-viewer-app' ), cif_viewer_asset_version( 'assets/metrics-page.js' ), true );
 	wp_register_style( 'cif-viewer-symmetry-page', CIF_VIEWER_URL . 'assets/symmetry.css', array( 'cif-viewer-style' ), cif_viewer_asset_version( 'assets/symmetry.css' ) );
@@ -520,6 +738,7 @@ function cif_viewer_shortcode() {
 	wp_enqueue_script( 'cif-viewer-app' );
 	wp_enqueue_script( 'cif-viewer-amc2cif' );
 	wp_enqueue_script( 'cif-viewer-amc2cif-ui' );
+	wp_enqueue_script( 'cif-viewer-table2amc' );
 	wp_enqueue_script( 'cif-viewer-metrics' );
 
 	// The token stays on the server: the browser fetches records through the
@@ -527,6 +746,7 @@ function cif_viewer_shortcode() {
 	$config = array(
 		'recordProxyUrl' => rest_url( 'odr-rruff-cifviewer/v1/record/' ),
 		'fileProxyUrl'   => rest_url( 'odr-rruff-cifviewer/v1/file/' ),
+		'minimalCifUrl'  => rest_url( 'odr-rruff-cifviewer/v1/minimal-cif' ),
 		'restNonce'      => wp_create_nonce( 'wp_rest' ),
 		// The metrics view's data (scripts/metrics.js), put in the plugin's data/ folder.
 		'metricsUrl'     => CIF_VIEWER_URL . 'data/metrics.json',
@@ -587,9 +807,30 @@ function cif_viewer_shortcode() {
 					</label>
 					<div id="amcToCifStatus"></div>
 					<button id="copyAmcToCifBtn" class="cif-viewer-btn" type="button">Copy</button>
-					<button id="sendAmcToCifBtn" hidden class="cif-viewer-btn" type="button">Send</button>
 					<textarea id="amcToCifOutput" readonly rows="1"></textarea>
-					<div id="sendAmcToCifStatus" hidden></div>
+					<button id="sendAmcToCifBtn" class="cif-viewer-btn" type="button" disabled>Send</button>
+					<div id="sendAmcToCifStatus"></div>
+				</div>
+
+				<div id="tableToAmcSection">
+					<h3>Paper Table &rarr; AMC</h3>
+					<p>Paste an atom table copied from a paper, header row included. It can hold several datasets, each under its own title line (e.g. Phl1a), and a separate U(i,j) table after it.</p>
+					<div class="table-scales">
+						<label>Coordinates &times; 10^<input type="number" id="tableXyzPower" value="4" min="0" max="9"></label>
+						<label>Isotropic &times; 10^<input type="number" id="tableIsoPower" value="3" min="0" max="9"></label>
+						<label>Anisotropic &times; 10^<input type="number" id="tableAnisoPower" value="3" min="0" max="9"></label>
+						<label><input type="checkbox" id="tableHexagonal"> Hexagonal or rhombohedral cell (when no cell is given)</label>
+					</div>
+					<label class="table-field" for="tableInput">Atom table</label>
+					<textarea id="tableInput" rows="8" spellcheck="false"></textarea>
+					<label class="table-field" for="tableCellInput">Cell parameters (optional): one line per dataset, e.g. <code>Phl1a 5.306(1) 9.195(3) 10.272(3) 90 100.01(2) 90 C2/m</code>. Four numbers are a b c beta; a line with only a space group sets it for all.</label>
+					<textarea id="tableCellInput" rows="3" spellcheck="false"></textarea>
+					<label class="table-field" for="tableHeaderInput">AMC header (optional): mineral, authors, journal and title, put in front of every dataset</label>
+					<textarea id="tableHeaderInput" rows="3" spellcheck="false"></textarea>
+					<div id="tableToAmcStatus"></div>
+					<button id="copyTableToAmcBtn" class="cif-viewer-btn" type="button">Copy</button>
+					<button id="downloadTableToAmcBtn" class="cif-viewer-btn" type="button">Download</button>
+					<textarea id="tableToAmcOutput" readonly rows="1"></textarea>
 				</div>
 
 				<div id="unitCellSection" hidden>
