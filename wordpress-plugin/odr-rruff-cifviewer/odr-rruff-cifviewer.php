@@ -722,7 +722,6 @@ function cif_viewer_register_assets() {
 	wp_register_script( 'cif-viewer-app', CIF_VIEWER_URL . 'assets/app.js', array( 'cif-viewer-spacegroups', 'cif-viewer-submit', 'cif-viewer-symmetry', 'cif-viewer-spacegroupdata', 'cif-viewer-unitcell' ), cif_viewer_asset_version( 'assets/app.js' ), true );
 	wp_register_script( 'cif-viewer-amc2cif', CIF_VIEWER_URL . 'assets/amc2cif.js', array( 'cif-viewer-spacegroups', 'cif-viewer-symmetry', 'cif-viewer-spacegroupdata', 'cif-viewer-unitcell' ), cif_viewer_asset_version( 'assets/amc2cif.js' ), true );
 	wp_register_script( 'cif-viewer-amc2cif-ui', CIF_VIEWER_URL . 'assets/amc2cif-ui.js', array( 'cif-viewer-app', 'cif-viewer-amc2cif' ), cif_viewer_asset_version( 'assets/amc2cif-ui.js' ), true );
-	wp_register_script( 'cif-viewer-table2amc', CIF_VIEWER_URL . 'assets/table2amc.js', array( 'cif-viewer-app', 'cif-viewer-amc2cif' ), cif_viewer_asset_version( 'assets/table2amc.js' ), true );
 	wp_register_style( 'cif-viewer-metrics', CIF_VIEWER_URL . 'assets/metrics.css', array( 'cif-viewer-style' ), cif_viewer_asset_version( 'assets/metrics.css' ) );
 	wp_register_script( 'cif-viewer-metrics', CIF_VIEWER_URL . 'assets/metrics-page.js', array( 'cif-viewer-app' ), cif_viewer_asset_version( 'assets/metrics-page.js' ), true );
 	wp_register_style( 'cif-viewer-symmetry-page', CIF_VIEWER_URL . 'assets/symmetry.css', array( 'cif-viewer-style' ), cif_viewer_asset_version( 'assets/symmetry.css' ) );
@@ -738,7 +737,6 @@ function cif_viewer_shortcode() {
 	wp_enqueue_script( 'cif-viewer-app' );
 	wp_enqueue_script( 'cif-viewer-amc2cif' );
 	wp_enqueue_script( 'cif-viewer-amc2cif-ui' );
-	wp_enqueue_script( 'cif-viewer-table2amc' );
 	wp_enqueue_script( 'cif-viewer-metrics' );
 
 	// The token stays on the server: the browser fetches records through the
@@ -810,27 +808,6 @@ function cif_viewer_shortcode() {
 					<textarea id="amcToCifOutput" readonly rows="1"></textarea>
 					<button id="sendAmcToCifBtn" class="cif-viewer-btn" type="button" disabled>Send</button>
 					<div id="sendAmcToCifStatus"></div>
-				</div>
-
-				<div id="tableToAmcSection">
-					<h3>Paper Table &rarr; AMC</h3>
-					<p>Paste an atom table copied from a paper, header row included. It can hold several datasets, each under its own title line (e.g. Phl1a), and a separate U(i,j) table after it.</p>
-					<div class="table-scales">
-						<label>Coordinates &times; 10^<input type="number" id="tableXyzPower" value="4" min="0" max="9"></label>
-						<label>Isotropic &times; 10^<input type="number" id="tableIsoPower" value="3" min="0" max="9"></label>
-						<label>Anisotropic &times; 10^<input type="number" id="tableAnisoPower" value="3" min="0" max="9"></label>
-						<label><input type="checkbox" id="tableHexagonal"> Hexagonal or rhombohedral cell (when no cell is given)</label>
-					</div>
-					<label class="table-field" for="tableInput">Atom table</label>
-					<textarea id="tableInput" rows="8" spellcheck="false"></textarea>
-					<label class="table-field" for="tableCellInput">Cell parameters (optional): one line per dataset, e.g. <code>Phl1a 5.306(1) 9.195(3) 10.272(3) 90 100.01(2) 90 C2/m</code>. Four numbers are a b c beta; a line with only a space group sets it for all.</label>
-					<textarea id="tableCellInput" rows="3" spellcheck="false"></textarea>
-					<label class="table-field" for="tableHeaderInput">AMC header (optional): mineral, authors, journal and title, put in front of every dataset</label>
-					<textarea id="tableHeaderInput" rows="3" spellcheck="false"></textarea>
-					<div id="tableToAmcStatus"></div>
-					<button id="copyTableToAmcBtn" class="cif-viewer-btn" type="button">Copy</button>
-					<button id="downloadTableToAmcBtn" class="cif-viewer-btn" type="button">Download</button>
-					<textarea id="tableToAmcOutput" readonly rows="1"></textarea>
 				</div>
 
 				<div id="unitCellSection" hidden>

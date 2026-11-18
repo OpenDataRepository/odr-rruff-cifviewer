@@ -50,27 +50,8 @@
   border: 1px solid var(--cifv-border);
 }
 
-.cif-viewer-app .table-scales {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem 1.25rem;
-  margin-bottom: 0.75rem;
-}
-
-.cif-viewer-app .table-scales input[type="number"] {
-  width: 3.2rem;
-  margin-left: 0.15rem;
-}
-
-.cif-viewer-app .table-field {
-  display: block;
-  margin: 0.5rem 0 0.25rem;
-  font-size: 0.9rem;
-}
-
 .cif-viewer-app #amcHeaderOutput,
 .cif-viewer-app #amcToCifOutput,
-.cif-viewer-app #tableToAmcOutput,
 .cif-viewer-app #citationInput,
 .cif-viewer-app #citationOutput {
   overflow-y: hidden;

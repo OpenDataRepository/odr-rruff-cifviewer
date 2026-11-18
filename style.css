@@ -68,28 +68,8 @@ textarea {
   border: 1px solid var(--border);
 }
 
-/* Paper Table -> AMC: the scale of each kind of value, and the input labels. */
-.table-scales {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem 1.25rem;
-  margin-bottom: 0.75rem;
-}
-
-.table-scales input[type="number"] {
-  width: 3.2rem;
-  margin-left: 0.15rem;
-}
-
-.table-field {
-  display: block;
-  margin: 0.5rem 0 0.25rem;
-  font-size: 0.9rem;
-}
-
 #amcHeaderOutput,
 #amcToCifOutput,
-#tableToAmcOutput,
 #citationInput,
 #citationOutput {
   overflow-y: hidden;
