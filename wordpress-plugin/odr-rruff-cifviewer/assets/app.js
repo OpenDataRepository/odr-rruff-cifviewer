@@ -76,7 +76,7 @@ function tokenizeCIF(text) {
 }
 
 function parseCIF(text) {
-  const { tokens, tokenLineIndex, tokenIsBlock } = tokenizeCIF(text);
+  const { tokens, tokenLineIndex, tokenIsBlock } = tokenizeCIF(normalizeMinusSigns(text));
   // A CIF file can have multiple `data_` blocks (e.g. a "data_global" bibliographic
   // block plus one or more structural blocks like "data_I"/"data_II" for separately
   // refined twin domains). `blocks` keeps each one separate so callers that care about
@@ -210,7 +210,7 @@ function getApiField(apiRecord, fieldName) {
   if (!apiRecord || !Array.isArray(apiRecord.fields)) return undefined;
   const field = apiRecord.fields.find(f => f.field_name === fieldName);
   if (!field || field.value === undefined || field.value === null || field.value === '') return undefined;
-  return String(field.value);
+  return normalizeMinusSigns(field.value);
 }
 
 // The citation (Article Title/Journal/Year/Volume/Pages) for this specific AMCSD
@@ -253,14 +253,23 @@ function sanitizeCitationText(text) {
 const ASCII_REPLACEMENTS = {
   'ß': 'ss', 'æ': 'ae', 'Æ': 'AE', 'œ': 'oe', 'Œ': 'OE', 'ø': 'o', 'Ø': 'O',
   'ł': 'l', 'Ł': 'L', 'đ': 'd', 'Đ': 'D', 'ð': 'd', 'Ð': 'D', 'þ': 'th', 'Þ': 'Th', 'ı': 'i',
-  '‐': '-', '‑': '-', '‒': '-', '–': '-', '—': '-', '−': '-',
   '‘': "'", '’': "'", '‚': "'", '′': "'", '“': '"', '”': '"', '„': '"', '″': '"',
   '·': '*', '×': 'x', '…': '...', '◻': '[]', '□': '[]', 'µ': 'u', 'μ': 'u',
   ' ': ' ', ' ': ' ', ' ': ' ', '°': '',
 };
 
+// Text pasted from PDFs, Word, web pages and the API can use look-alike dashes
+// (Unicode minus, en/em dashes, non-breaking hyphens, full-width minus...) where
+// a negative sign or page range is meant. Those break number parsing and don't
+// belong in AMC/CIF files, so every one becomes the plain keyboard hyphen-minus.
+const MINUS_SIGN_RE = /[\u2010-\u2015\u2212\u2043\u02D7\uFE58\uFE63\uFF0D]/g;
+
+function normalizeMinusSigns(text) {
+  return String(text).replace(MINUS_SIGN_RE, '-');
+}
+
 function toAscii(text) {
-  return stripDiacritics(text)
+  return stripDiacritics(normalizeMinusSigns(text))
     .replace(/[^\x00-\x7F]/g, ch => ASCII_REPLACEMENTS[ch] ?? '');
 }
 
@@ -374,11 +383,14 @@ function crystalSystemFromITNumber(number) {
 }
 
 // Crystal system (like the space group itself) must come only from the CIF, not
-// the API. Returns '' when the CIF doesn't carry a usable space group IT number.
+// the API: its IT number, or else the number of its space group symbol (or of the group
+// its symmetry operators give). Returns '' when none of those work out.
 function getCrystalSystem(data) {
   const itNumber = getTag(data, '_space_group_IT_number');
-  if (!itNumber) return '';
-  return crystalSystemFromITNumber(Number(itNumber));
+  if (itNumber) return crystalSystemFromITNumber(Number(itNumber));
+  const name = cifSpaceGroupName(data).replace(/^\*|:.*$/g, '');
+  const number = name && Object.keys(SPACE_GROUP_TABLE).find(n => SPACE_GROUP_TABLE[n].includes(name));
+  return number ? crystalSystemFromITNumber(Number(number)) : '';
 }
 
 function resolveSpaceGroup(data) {
@@ -411,15 +423,47 @@ function resolveSpaceGroup(data) {
 // there is no shift; ops the group's operations at that origin, as 4x4
 // matrices, identity first). Throws when the CIF has no space group, the group isn't in the
 // list, or the CIF's operators match it at no origin.
-function amcSpaceGroupFromCif(data, sg, cell) {
+function cifSymmetryOperators(data) {
+  return getLoopValues(data, '_space_group_symop_operation_xyz') || getLoopValues(data, '_symmetry_equiv_pos_as_xyz');
+}
+
+// The space group a CIF with no space group tag has, worked out from its symmetry operators
+// (see SpaceGroupSymmetry.groupsFromOperators). Groups in the list that differ only in their
+// name have the same operators, so the operators alone can't tell them apart: `pickFirst`
+// takes the first anyway (fine for the unit cell, whose operations are the same either way),
+// otherwise that's an error. Throws when there are no operators or none of the groups fit.
+function spaceGroupFromOperators(data, pickFirst) {
+  const opsText = cifSymmetryOperators(data);
+  if (!opsText) throw new Error('The CIF has no space group and no symmetry operators.');
+  const names = SpaceGroupSymmetry.groupsFromOperators(SPACE_GROUP_GENERATORS, opsText);
+  if (!names.length) throw new Error("The CIF has no space group, and its symmetry operators don't match any group in the space group list.");
+  if (names.length > 1 && !pickFirst) {
+    throw new Error(`The CIF has no space group, and its symmetry operators fit more than one group in the list: ${names.join(', ')}.`);
+  }
+  return names[0];
+}
+
+// The CIF's space group (resolveSpaceGroup), or else the one its symmetry operators give; ''
+// when neither works out. For the crystal system shown under the AMC header.
+function cifSpaceGroupName(data) {
+  const sg = resolveSpaceGroup(data);
+  if (sg) return sg;
+  try {
+    return cifSymmetryOperators(data) ? spaceGroupFromOperators(data, true) : '';
+  } catch (e) {
+    return '';
+  }
+}
+
+function amcSpaceGroupFromCif(data, sg, cell, pickFirst = false) {
   const S = SpaceGroupSymmetry;
-  if (!sg) throw new Error('The CIF has no space group.');
+  if (!sg) sg = spaceGroupFromOperators(data, pickFirst);
   // A CIF origin-choice suffix ("Fd-3m:2") isn't part of the list's names.
   const name = sg.replace(/:.*$/, '');
   const settings = S.groupSettings(SPACE_GROUP_GENERATORS, name);
   if (!settings.length) throw new Error(`Space group ${name} is not in the space group list.`);
 
-  const opsText = getLoopValues(data, '_space_group_symop_operation_xyz') || getLoopValues(data, '_symmetry_equiv_pos_as_xyz');
+  const opsText = cifSymmetryOperators(data);
   const cellSetting = S.settingFromCell(cell, settings);
   const cellIsClear = S.cellGivesSetting(cell, settings);
   if ((cellIsClear || !opsText) && !settings.includes(cellSetting)) {
@@ -838,7 +882,7 @@ function unitCellFromCif(data) {
       return [k, stripUncertainty(value)];
     }));
     const cell = Object.fromEntries(Object.entries(raw).map(([k, v]) => [k, parseFloat(v)]));
-    const { ops } = amcSpaceGroupFromCif(view, resolveSpaceGroup(view), raw);
+    const { ops } = amcSpaceGroupFromCif(view, resolveSpaceGroup(view), raw, true);
 
     const loop = getAtomSiteLoop(block);
     const col = tag => loop.tags.indexOf(tag);
@@ -888,40 +932,36 @@ function buildAtomDatasetsOutput(data) {
 
   if (datasetTables.length === 0) return '';
 
-  const alignRight = [false, true, true, true, true, true, true, true, true, true, true, true]
+  return datasetTables.flatMap(({ rows, isoLabel }) => formatAmcAtomTable(rows, isoLabel)).join('\n');
+}
+
+// One dataset's AMC atom table as lines, header row first and "END" last. rows
+// hold atom, x, y, z, occ, the isotropic term and the six anisotropic terms;
+// isoLabel is "Uiso" or "Biso" and anisoLabel "U" or "B", whichever the
+// source used.
+function formatAmcAtomTable(fullRows, isoLabel, anisoLabel = 'U') {
+  let rows = fullRows.map(row => row.slice(0, VISIBLE_ATOM_COLUMNS));
+  let headers = ['atom', 'x', 'y', 'z', 'occ', isoLabel, ...['1,1', '2,2', '3,3', '1,2', '1,3', '2,3'].map(ij => `${anisoLabel}(${ij})`)]
     .slice(0, VISIBLE_ATOM_COLUMNS);
+  let alignRight = headers.map((_, col) => col > 0);
 
-  const lines = [];
-  for (const { rows: fullRows, isoLabel } of datasetTables) {
-    let rows = fullRows.map(row => row.slice(0, VISIBLE_ATOM_COLUMNS));
-    // The isotropic displacement column is labeled "Biso" or "Uiso" depending on
-    // which this particular dataset's CIF actually used - see buildAtomTableRows.
-    let headers = ['atom', 'x', 'y', 'z', 'occ', isoLabel, 'U(1,1)', 'U(2,2)', 'U(3,3)', 'U(1,2)', 'U(1,3)', 'U(2,3)']
-      .slice(0, VISIBLE_ATOM_COLUMNS);
-    let datasetAlignRight = alignRight;
-
-    // Drop any column beyond atom/x/y/z entirely (header included) if not a single
-    // atom in this dataset has a value for it - e.g. no anisotropic data at all means
-    // 6 empty U(i,j) columns showing headers over nothing but blank cells.
-    const keepColumn = headers.map((_, col) => col < 4 || rows.some(r => r[col] !== ''));
-    if (keepColumn.includes(false)) {
-      headers = headers.filter((_, col) => keepColumn[col]);
-      datasetAlignRight = datasetAlignRight.filter((_, col) => keepColumn[col]);
-      rows = rows.map(row => row.filter((_, col) => keepColumn[col]));
-    }
-
-    // Each column is padded to the widest value it holds (label included), so
-    // columns line up regardless of how long any individual atom label or
-    // coordinate is - this is plain fixed-width text, not an HTML table.
-    const widths = headers.map((header, col) => Math.max(header.length, ...rows.map(r => r[col].length)));
-
-    const formatRow = cells => cells.map((cell, col) => padColumn(cell, widths[col], datasetAlignRight[col])).join('  ').trimEnd();
-
-    lines.push(formatRow(headers));
-    rows.forEach(row => lines.push(formatRow(row)));
-    lines.push('END');
+  // Drop any column beyond atom/x/y/z entirely (header included) if not a single
+  // atom in this dataset has a value for it - e.g. no anisotropic data at all means
+  // 6 empty U(i,j) columns showing headers over nothing but blank cells.
+  const keepColumn = headers.map((_, col) => col < 4 || rows.some(r => r[col] !== ''));
+  if (keepColumn.includes(false)) {
+    headers = headers.filter((_, col) => keepColumn[col]);
+    alignRight = alignRight.filter((_, col) => keepColumn[col]);
+    rows = rows.map(row => row.filter((_, col) => keepColumn[col]));
   }
-  return lines.join('\n');
+
+  // Each column is padded to the widest value it holds (label included), so
+  // columns line up regardless of how long any individual atom label or
+  // coordinate is - this is plain fixed-width text, not an HTML table.
+  const widths = headers.map((header, col) => Math.max(header.length, ...rows.map(r => r[col].length)));
+  const formatRow = cells => cells.map((cell, col) => padColumn(cell, widths[col], alignRight[col])).join('  ').trimEnd();
+
+  return [formatRow(headers), ...rows.map(formatRow), 'END'];
 }
 
 // Shows every atom in the unit cell, built from whichever file (CIF or AMC)
@@ -1088,11 +1128,13 @@ window.addEventListener('drop', event => event.preventDefault());
 
 setupDropZone(document.getElementById('fileInput'));
 
-function loadCifText(fileName, text) {
+// `withUnitCell` false leaves the Unit Cell Atoms as they are: a record's CIF only fills it
+// when the record has nothing it ranks higher (see recordUnitCellSource).
+function loadCifText(fileName, text, withUnitCell = true) {
   currentFileName = fileName;
   currentCifData = parseCIF(text);
   renderData(currentCifData);
-  renderUnitCell(fileName, () => unitCellFromCif(currentCifData));
+  if (withUnitCell) renderUnitCell(fileName, () => unitCellFromCif(currentCifData));
 }
 
 document.getElementById('fileInput').addEventListener('change', event => {
@@ -1134,6 +1176,33 @@ function setupRecordCifs(apiRecord) {
   document.getElementById('cifSourceSwitch').hidden = !recordCifs.original && !recordCifs.minimal;
   const first = ['original', 'minimal'].find(source => recordCifs[source]);
   if (first) loadRecordCif(first);
+  // The dropdown's CIF only makes the AMC header; the unit cell comes from its own source.
+  const cellSource = recordUnitCellSource(apiRecord);
+  if (cellSource && cellSource !== 'amc' && cellSource !== first) showRecordCifUnitCell(cellSource);
+}
+
+// What the record's calculations (the Unit Cell Atoms) are made from: its AMC file when it has
+// one (shown by showCifFromApiRecord), else its minimal CIF, else its original CIF. A minimal
+// CIF made from the AMC file is only a copy, and the original CIF may leave things out (such
+// as the space group), so neither replaces the AMC file.
+function recordUnitCellSource(apiRecord) {
+  if (getApiField(apiRecord, 'AMC File Contents')) return 'amc';
+  return ['minimal', 'original'].find(source => recordCifs[source]);
+}
+
+async function recordCifText(cif) {
+  if (cif.text === undefined) cif.text = (await fetchCifFile(cif.fileUuid)).text;
+  return cif.text;
+}
+
+async function showRecordCifUnitCell(source) {
+  const cif = recordCifs[source];
+  try {
+    const data = parseCIF(await recordCifText(cif));
+    renderUnitCell(cif.name, () => unitCellFromCif(data));
+  } catch (err) {
+    renderUnitCell(cif.name, () => { throw new Error(`Could not load the record's ${CIF_SOURCE_LABELS[source]}: ${err.message}`); });
+  }
 }
 
 // null for a dropped file, which the dropdown then names.
@@ -1148,13 +1217,11 @@ async function loadRecordCif(source) {
   const request = ++recordCifRequest;
   markCifSource(source);
   try {
-    if (cif.text === undefined) {
-      status.textContent = `Downloading the record's ${label}...`;
-      cif.text = (await fetchCifFile(cif.fileUuid)).text;
-    }
+    if (cif.text === undefined) status.textContent = `Downloading the record's ${label}...`;
+    await recordCifText(cif);
     // Switched again, or a file was dropped, while this one downloaded.
     if (request !== recordCifRequest) return;
-    loadCifText(cif.name, cif.text);
+    loadCifText(cif.name, cif.text, recordUnitCellSource(currentApiRecord) === source);
     // renderData leaves an error here if the header couldn't be built.
     if (!status.textContent) status.textContent = `From the record's ${label} (${cif.name}).`;
   } catch (err) {
@@ -1312,7 +1379,7 @@ function wrapText(text, maxWidth) {
 }
 
 function parseCitationString(citation) {
-  const cleaned = citation.trim().replace(/\s+/g, ' ');
+  const cleaned = normalizeMinusSigns(citation).trim().replace(/\s+/g, ' ');
 
   const yearMatch = cleaned.match(/^(.*?)\s*\((\d{4})\)\s*(.*)$/);
   if (!yearMatch) return null;
@@ -1323,7 +1390,7 @@ function parseCitationString(citation) {
   // Greedy title capture backtracks to the LAST ". " in the string, which is what
   // separates the title from "Journal Volume, Pages" even when the title itself
   // contains internal periods (e.g. "...carbonates. III. Crystal structures...")
-  const tailMatch = remainder.match(/^(.*)\.\s+([A-Za-z][A-Za-z .]*?)\s+([A-Za-z0-9]+(?:\([^)]*\))?),\s*(\d+(?:[-–]\d+)?)\s*$/);
+  const tailMatch = remainder.match(/^(.*)\.\s+([A-Za-z][A-Za-z .]*?)\s+([A-Za-z0-9]+(?:\([^)]*\))?),\s*(\d+(?:-\d+)?)\s*$/);
   if (!tailMatch) return null;
 
   const titleRaw = tailMatch[1].trim();
@@ -1380,7 +1447,7 @@ document.getElementById('formatCitationBtn').addEventListener('click', () => {
 
   const formatted = formatCitationBlock(input);
   if (formatted === null) {
-    status.textContent = "Couldn't parse that citation — expected format: Authors (Year) Title. Journal Volume, Pages";
+    status.textContent = "Couldn't parse that citation - expected format: Authors (Year) Title. Journal Volume, Pages";
     output.value = '';
   } else {
     status.textContent = '';

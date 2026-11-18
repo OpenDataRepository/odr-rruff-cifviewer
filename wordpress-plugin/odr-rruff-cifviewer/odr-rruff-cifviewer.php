@@ -2,7 +2,7 @@
 /**
  * Plugin Name: ODR RRUFF CIF Viewer
  * Description: Reads a CIF and creates the AMC header
- * Version: 1.0.14
+ * Version: 1.0.15
  * Author: Nathan
  */
 
@@ -10,7 +10,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'CIF_VIEWER_VERSION', '1.0.14' );
+define( 'CIF_VIEWER_VERSION', '1.0.15' );
 define( 'CIF_VIEWER_URL', plugin_dir_url( __FILE__ ) );
 define( 'CIF_VIEWER_TOKEN_URL', 'https://www.rruff.net/odr_rruff/api/v4/token' );
 define( 'CIF_VIEWER_RECORD_URL', 'https://www.rruff.net/odr_rruff/api/v4/dataset/record/' );
@@ -21,9 +21,6 @@ define( 'CIF_VIEWER_API_BASE', 'https://www.rruff.net/odr_rruff/api/v4' );
 define( 'CIF_VIEWER_UPLOAD_URL', 'https://www.rruff.net/odr_rruff/api/v4/file' );
 // GET template/<database_uuid> lists every field of a database, including empty ones a record leaves out.
 define( 'CIF_VIEWER_TEMPLATE_URL', 'https://www.rruff.net/odr_rruff/api/v4/template/' );
-// Sending a CIF from AMC -> CIF to a record's Minimal CIF and Minimal CIF Contents fields
-// writes to the database, so it stays off until this is true.
-define( 'CIF_VIEWER_ALLOW_MINIMAL_CIF_UPLOAD', false );
 // The ODR symmetry database the [odr_rruff_symmetry] page lists, and its every
 // record UUID (a limit of 0 returns all of them).
 define( 'CIF_VIEWER_SYMMETRY_DATABASE_UUID', 'e1caf946bba4b04aa57262848214' );
@@ -423,9 +420,6 @@ function cif_viewer_rest_symmetry_record( WP_REST_Request $request ) {
 // once the new one is in the field, so a failed upload changes nothing. The text ODR stores is
 // checked against what was sent.
 function cif_viewer_rest_minimal_cif( WP_REST_Request $request ) {
-	if ( ! CIF_VIEWER_ALLOW_MINIMAL_CIF_UPLOAD ) {
-		return cif_viewer_rest_error( 'Sending to the database is switched off for now.', '', 403 );
-	}
 	$record_uuid = (string) $request->get_param( 'recordUuid' );
 	$text        = (string) $request->get_param( 'text' );
 	if ( ! preg_match( '/^[0-9a-fA-F]{1,64}$/', $record_uuid ) ) {

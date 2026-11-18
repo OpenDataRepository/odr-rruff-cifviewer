@@ -322,12 +322,71 @@ function tableShifts(table, name, setting) {
   return Object.keys(table).filter(k => k.startsWith(prefix)).map(k => parseOriginShift(k.slice(prefix.length - 1))).filter(Boolean);
 }
 
+// The unstarred group names (no setting) whose operations, in some setting and at some origin,
+// are exactly the operators `opsText` (a CIF's symop loop), for a CIF that lists its operators
+// but no space group. Groups that fit with no origin shift come first, then in table order.
+// Several names can fit: the list has groups that differ only in their name.
+// Each group is tried at every origin on the 1/24 grid, so the check works in whole 24ths
+// rather than exact fractions: rotation rows as integers, translations as 0..23.
+function intOperator(M) {
+  const R = M.slice(0, 3).map(row => row.slice(0, 3).map(([n, d]) => n / d));
+  const t = M.slice(0, 3).map(row => (row[3][0] * STEPS) / row[3][1]);
+  return { R, t: t.map(v => ((v % STEPS) + STEPS) % STEPS), onGrid: t.every(Number.isInteger), key: rotationKey(M) };
+}
+
+// Whether `base` (intOperators) moved to an origin, in 24ths, is exactly `target` (rotation
+// key -> Set of translations "a,b,c" in 24ths). Zero first, then every other origin.
+function fitsAtSomeOrigin(base, target) {
+  const fitsAt = p => base.every(({ R, t, key }) => {
+    const ts = target.get(key);
+    return ts && ts.has(t.map((ti, i) => ((ti + R[i][0] * p[0] + R[i][1] * p[1] + R[i][2] * p[2] - p[i]) % STEPS + STEPS) % STEPS).join(','));
+  });
+  if (fitsAt([0, 0, 0])) return 'unshifted';
+  for (let x = 0; x < STEPS; x++) for (let y = 0; y < STEPS; y++) for (let z = 0; z < STEPS; z++) {
+    if (fitsAt([x, y, z])) return 'shifted';
+  }
+  return null;
+}
+
+function groupsFromOperators(table, opsText) {
+  const target = new Set(opsText.map(normalizeOperator));
+  if (target.has(null)) throw new Error("Could not read the CIF's symmetry operators.");
+  const targetOps = [...target].map(op => intOperator(generatorToMatrix(op)));
+  if (!targetOps.every(op => op.onGrid)) return [];
+  const targetByRotation = new Map();
+  targetOps.forEach(({ key, t }) => {
+    if (!targetByRotation.has(key)) targetByRotation.set(key, new Set());
+    targetByRotation.get(key).add(t.join(','));
+  });
+  const fits = [];
+  for (const symbol of Object.keys(table)) {
+    const m = symbol.match(SYMBOL_RE);
+    if (!m || m[1] || m[4] !== undefined) continue;
+    const [, , name, setting = ''] = m;
+    let base;
+    try {
+      base = groupOperators(table, name, setting);
+    } catch (e) {
+      continue; // a group whose generators don't expand cleanly can't be told apart
+    }
+    if (base.length !== target.size) continue;
+    // Moving the origin keeps the rotation parts, so they have to match first.
+    const baseOps = base.map(intOperator);
+    const rotations = new Set(baseOps.map(op => op.key));
+    if (rotations.size !== targetByRotation.size || [...rotations].some(r => !targetByRotation.has(r))) continue;
+    const fit = baseOps.every(op => op.onGrid) && fitsAtSomeOrigin(baseOps, targetByRotation);
+    if (fit) fits.push({ name, unshifted: fit === 'unshifted' });
+  }
+  const ordered = [...fits.filter(f => f.unshifted), ...fits.filter(f => !f.unshifted)];
+  return [...new Set(ordered.map(f => f.name))];
+}
+
 return {
   frac, fadd, fmul, fmod1, formatFraction, generatorToMatrix, matMul, matPow, format3x4,
   reduceToCell, shiftOrigin, parseShiftValue, formatOperator, centringVectors, expandGenerators,
   IDENTITY, SYMBOL_RE,
   parseOriginShift, formatShiftValue, groupSettings, settingFromCell, cellGivesSetting, missingSettingMessage, groupOperators,
-  normalizeOperator, findOriginShift, tableShifts,
+  normalizeOperator, findOriginShift, tableShifts, groupsFromOperators,
 };
 })();
 
