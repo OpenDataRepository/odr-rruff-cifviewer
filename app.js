@@ -225,6 +225,16 @@ function findRecordByDatabaseUuid(record, databaseUuid) {
   return record.records.find(child => child.database_uuid === databaseUuid);
 }
 
+// The IMA ideal formula ("Valence Formula") of the record's IMA mineral, the Mineral
+// record among its children, or undefined. It sets the scale of the formulas computed
+// from the atoms (see UnitCell.chemistry), so they read like the IMA's.
+const IMA_MINERAL_DATABASE_UUID = '8737e9e4212f5eac3703aeeb5cae';
+
+function imaIdealFormula(apiRecord) {
+  const minerals = (apiRecord && apiRecord.records || []).filter(child => child.database_uuid === IMA_MINERAL_DATABASE_UUID);
+  return minerals.map(mineral => getApiField(mineral, 'Valence Formula')).find(Boolean);
+}
+
 // Citation fields come from the API's raw bibliography entry, which uses diacritics
 // and wiki-style markup (_2_ subscript, ^-^ superscript, <i> italics, · multiplication)
 // that .amc files can't contain. ODR's own generated "AMC File Contents" field shows
@@ -913,7 +923,7 @@ function unitCellFromCif(data) {
       };
     });
     const labels = { iso: isoIdx !== -1 ? isoLabel : undefined, aniso };
-    return { cell, atoms: UnitCell.expandAtoms(cell, ops, atoms), labels };
+    return { cell, atoms: UnitCell.expandAtoms(cell, ops, atoms), labels, symmetryCount: ops.length };
   });
   if (results.length === 0) throw new Error('No atom data found.');
   return results;
@@ -975,8 +985,9 @@ function renderUnitCell(fileName, build) {
   try {
     const datasets = build();
     const unknown = new Set();
-    output.value = datasets.map(({ cell, atoms, labels }, i) => {
-      const chem = UnitCell.chemistry(atoms, cell);
+    const idealFormula = imaIdealFormula(currentApiRecord);
+    output.value = datasets.map(({ cell, atoms, labels, symmetryCount }, i) => {
+      const chem = UnitCell.chemistry(atoms, cell, { symmetryCount, idealFormula });
       chem.unknown.forEach(label => unknown.add(label));
       return [
         ...(datasets.length > 1 ? [`Dataset ${i + 1}`] : []),

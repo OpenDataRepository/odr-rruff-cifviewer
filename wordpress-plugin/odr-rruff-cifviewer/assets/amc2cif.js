@@ -237,8 +237,9 @@ function unitCellFromAmc(text) {
   return datasets.map(unitCellOfDataset);
 }
 
-// One dataset's unit cell, { cell, atoms, labels }, labels naming its displacement columns
-// for UnitCell.formatTable ({ iso: 'Uiso' or 'Biso', aniso: 'U' or 'B' }).
+// One dataset's unit cell, { cell, atoms, labels, symmetryCount }, labels naming its
+// displacement columns for UnitCell.formatTable ({ iso: 'Uiso' or 'Biso', aniso: 'U' or
+// 'B' }), symmetryCount the number of symmetry operations (for UnitCell.chemistry's Z).
 function unitCellOfDataset(dataset) {
   const cell = Object.fromEntries(['a', 'b', 'c', 'alpha', 'beta', 'gamma'].map(k => [k, parseFloat(dataset.cell[k])]));
   const col = name => dataset.columns.indexOf(name);
@@ -262,7 +263,7 @@ function unitCellOfDataset(dataset) {
     };
   });
   const ops = amcSymmetryMatrices(dataset.cell, dataset.originShift);
-  return { cell, atoms: UnitCell.expandAtoms(cell, ops, atoms), labels: { iso, aniso } };
+  return { cell, atoms: UnitCell.expandAtoms(cell, ops, atoms), labels: { iso, aniso }, symmetryCount: ops.length };
 }
 
 const AMC_CELL_LINE_RE = /^(-?[\d.]+)\s+(-?[\d.]+)\s+(-?[\d.]+)\s+(-?[\d.]+)\s+(-?[\d.]+)\s+(-?[\d.]+)\s+(\S+)$/;
@@ -582,14 +583,16 @@ function buildCifAtomLoops(dataset) {
         return [row.label, ...uValues.map(formatComputedDecimal)];
       });
     if (anisoRows.length) {
-      lines.push('', 'loop_', ...anisoTags, ...anisoRows.map(cells => cells.join(' ')));
+      lines.push('loop_', ...anisoTags, ...anisoRows.map(cells => cells.join(' ')));
     }
   }
 
   return lines.join('\n');
 }
 
-function buildCifFromAmc(text) {
+// idealFormula (optional) is the IMA ideal formula, which sets the scale of
+// _chemical_formula_sum and Z (see UnitCell.chemistry).
+function buildCifFromAmc(text, idealFormula) {
   const { header, datasets } = parseAmcText(text);
   if (datasets.length === 0) throw new Error('No atom data found.');
 
@@ -624,7 +627,6 @@ function buildCifFromAmc(text) {
 
   datasets.forEach((dataset, idx) => {
     if (datasets.length > 1) {
-      lines.push('');
       lines.push(`data_${header.amcsd || 'AMCSD'}_${idx + 1}`);
     }
     // The chemistry of the unit cell (UnitCell.chemistry): formula and Z go
@@ -633,8 +635,8 @@ function buildCifFromAmc(text) {
     // volume, which needs just the cell.
     let chemistryLines;
     try {
-      const { cell, atoms } = unitCellOfDataset(dataset);
-      chemistryLines = UnitCell.chemistryCifLines(UnitCell.chemistry(atoms, cell));
+      const { cell, atoms, symmetryCount } = unitCellOfDataset(dataset);
+      chemistryLines = UnitCell.chemistryCifLines(UnitCell.chemistry(atoms, cell, { symmetryCount, idealFormula }));
     } catch (err) {
       const { a, b, c, alpha, beta, gamma } = dataset.cell;
       const volume = computeCellVolume(...[a, b, c, alpha, beta, gamma].map(parseFloat));
@@ -655,8 +657,6 @@ function buildCifFromAmc(text) {
     lines.push('loop_');
     lines.push('_space_group_symop_operation_xyz');
     for (const op of amcSymmetryOperators(dataset.cell, dataset.originShift)) lines.push(`  '${op}'`);
-
-    lines.push('');
     lines.push(buildCifAtomLoops(dataset));
   });
 

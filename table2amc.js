@@ -663,7 +663,8 @@ const PAPER_CELL_PLACEHOLDER = 'a b c alpha beta gamma spacegroup';
 // each with the optional header lines (mineral, authors, journal, title) in
 // front, a "Sample:" line naming it when it has a title, its cell line, and
 // its atom table. options: { xyzPower, isoPower, anisoPower, allowThirds,
-// cellText, siteText (see readSiteContents), headerText }. Returns { text, notes, count }.
+// cellText, siteText (see readSiteContents), headerText, idealFormula (the
+// record's IMA formula, which sets the scale of Z) }. Returns { text, notes, count }.
 function buildAmcFromPaperTables(tableText, options) {
   tableText = normalizeMinusSigns(tableText);
   options = { ...options, cellText: normalizeMinusSigns(options.cellText || ''), headerText: normalizeMinusSigns(options.headerText || '') };
@@ -753,7 +754,7 @@ function buildAmcFromPaperTables(tableText, options) {
     if (cellLine !== PAPER_CELL_PLACEHOLDER && typeof unitCellFromAmc === 'function') {
       try {
         const [unitCell] = unitCellFromAmc(headerLines.length ? block : `x\n${block}`);
-        const chem = UnitCell.chemistry(unitCell.atoms, unitCell.cell);
+        const chem = UnitCell.chemistry(unitCell.atoms, unitCell.cell, { symmetryCount: unitCell.symmetryCount, idealFormula: options.idealFormula });
         if (!noElement.length) {
           notes.push(`${name}Formula ${chem.formula}, Z = ${chem.Z}.`);
           notes.push(chargeBalanceNote(chargeBalance(unitCell.atoms, chem.Z), name));
@@ -847,6 +848,7 @@ if (typeof document !== 'undefined' && document.getElementById('tableToAmcSectio
         cellText: field('tableCellInput').value,
         siteText: field('tableSiteInput').value,
         headerText: field('tableHeaderInput').value,
+        idealFormula: typeof imaIdealFormula === 'function' && typeof currentApiRecord !== 'undefined' ? imaIdealFormula(currentApiRecord) : undefined,
       });
       output.value = toAscii(text);
       const unique = [...new Set(notes)];
