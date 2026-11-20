@@ -1055,6 +1055,8 @@ function renderData(data) {
     status.textContent = `Error: ${err.message}`;
   }
   autoSizeTextarea(amcHeaderOutput);
+  // The paper-table converter (table2amc.js) takes its header from the same record.
+  document.dispatchEvent(new Event('amcheaderchange'));
 }
 
 // Dropping a file onto a .drop-zone feeds it through the zone's file input
@@ -1326,6 +1328,99 @@ function copyTextarea(id) {
 document.getElementById('copyHeaderBtn').addEventListener('click', () => copyTextarea('amcHeaderOutput'));
 document.getElementById('copyUnitCellBtn').addEventListener('click', () => copyTextarea('unitCellOutput'));
 document.getElementById('copyCitationBtn').addEventListener('click', () => copyTextarea('citationOutput'));
+
+// Each output box is read-only until its Edit button (data-edits names the
+// box) is pressed; pressing it again (Done) locks the box with the edits kept.
+// Copy, Download and Send take whatever the box holds, edits included.
+function setupEditButton(button) {
+  const box = document.getElementById(button.dataset.edits);
+  if (!box) return;
+  button.addEventListener('click', () => {
+    const editing = box.readOnly;
+    box.readOnly = !editing;
+    box.classList.toggle('editing', editing);
+    button.textContent = editing ? 'Done' : 'Edit';
+    if (editing) box.focus();
+  });
+  box.addEventListener('input', () => autoSizeTextarea(box));
+}
+document.querySelectorAll('button[data-edits]').forEach(setupEditButton);
+
+// --- Collapsible sections ---
+// Each converter section folds up under its title, so the page opens as a
+// short list of titles and people open the ones they want. Clicking a title
+// (or Enter/Space on it) opens or closes its section; Expand all / Collapse
+// all do every one. Which sections a viewer has open is remembered in their
+// browser. The AMCSD Record box, shown only when a record can't be loaded,
+// always stays open.
+const OPEN_SECTIONS_KEY = 'cifViewerOpenSections';
+
+function readOpenSections() {
+  try {
+    return JSON.parse(localStorage.getItem(OPEN_SECTIONS_KEY)) || {};
+  } catch {
+    return {};
+  }
+}
+
+function writeOpenSections(open) {
+  try {
+    localStorage.setItem(OPEN_SECTIONS_KEY, JSON.stringify(open));
+  } catch {
+    // Storage blocked (private window): sections still open and close, just aren't remembered.
+  }
+}
+
+function setupCollapsibleSections() {
+  const panel = document.getElementById('panel');
+  if (!panel) return;
+  const open = readOpenSections();
+  const sections = [...panel.children].filter(section => section.id && section.id !== 'apiSection'
+    && section.firstElementChild && section.firstElementChild.tagName === 'H3');
+
+  const setOpen = (section, isOpen, remember = true) => {
+    section.classList.toggle('collapsed', !isOpen);
+    section.firstElementChild.setAttribute('aria-expanded', String(isOpen));
+    // A box sized while its section was folded up measured as empty, so it's sized again.
+    if (isOpen) section.querySelectorAll('textarea').forEach(t => { if (t.style.height) autoSizeTextarea(t); });
+    if (remember) {
+      open[section.id] = isOpen;
+      writeOpenSections(open);
+    }
+  };
+
+  for (const section of sections) {
+    const title = section.firstElementChild;
+    const body = document.createElement('div');
+    body.className = 'section-body';
+    while (title.nextSibling) body.appendChild(title.nextSibling);
+    section.appendChild(body);
+    title.classList.add('section-toggle');
+    title.tabIndex = 0;
+    title.setAttribute('role', 'button');
+    title.addEventListener('click', () => setOpen(section, section.classList.contains('collapsed')));
+    title.addEventListener('keydown', event => {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      event.preventDefault();
+      title.click();
+    });
+    setOpen(section, open[section.id] === true, false);
+  }
+
+  const controls = document.createElement('div');
+  controls.className = 'section-controls';
+  for (const [label, isOpen] of [['Expand all', true], ['Collapse all', false]]) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'cif-viewer-btn';
+    button.textContent = label;
+    button.addEventListener('click', () => sections.forEach(section => setOpen(section, isOpen)));
+    controls.appendChild(button);
+  }
+  panel.before(controls);
+}
+
+setupCollapsibleSections();
 
 // Runs a submit.js call, showing "Sending..." then the result in `statusId` -
 // shared by every "Send" button so each one only has to say what to send.

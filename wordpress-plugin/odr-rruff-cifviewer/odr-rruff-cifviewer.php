@@ -2,7 +2,7 @@
 /**
  * Plugin Name: ODR RRUFF CIF Viewer
  * Description: Reads a CIF and creates the AMC header
- * Version: 1.0.15
+ * Version: 1.0.16
  * Author: Nathan
  */
 
@@ -10,7 +10,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'CIF_VIEWER_VERSION', '1.0.15' );
+define( 'CIF_VIEWER_VERSION', '1.0.16' );
 define( 'CIF_VIEWER_URL', plugin_dir_url( __FILE__ ) );
 define( 'CIF_VIEWER_TOKEN_URL', 'https://www.rruff.net/odr_rruff/api/v4/token' );
 define( 'CIF_VIEWER_RECORD_URL', 'https://www.rruff.net/odr_rruff/api/v4/dataset/record/' );
@@ -722,6 +722,7 @@ function cif_viewer_register_assets() {
 	wp_register_script( 'cif-viewer-app', CIF_VIEWER_URL . 'assets/app.js', array( 'cif-viewer-spacegroups', 'cif-viewer-submit', 'cif-viewer-symmetry', 'cif-viewer-spacegroupdata', 'cif-viewer-unitcell' ), cif_viewer_asset_version( 'assets/app.js' ), true );
 	wp_register_script( 'cif-viewer-amc2cif', CIF_VIEWER_URL . 'assets/amc2cif.js', array( 'cif-viewer-spacegroups', 'cif-viewer-symmetry', 'cif-viewer-spacegroupdata', 'cif-viewer-unitcell' ), cif_viewer_asset_version( 'assets/amc2cif.js' ), true );
 	wp_register_script( 'cif-viewer-amc2cif-ui', CIF_VIEWER_URL . 'assets/amc2cif-ui.js', array( 'cif-viewer-app', 'cif-viewer-amc2cif' ), cif_viewer_asset_version( 'assets/amc2cif-ui.js' ), true );
+	wp_register_script( 'cif-viewer-table2amc', CIF_VIEWER_URL . 'assets/table2amc.js', array( 'cif-viewer-app', 'cif-viewer-amc2cif' ), cif_viewer_asset_version( 'assets/table2amc.js' ), true );
 	wp_register_style( 'cif-viewer-metrics', CIF_VIEWER_URL . 'assets/metrics.css', array( 'cif-viewer-style' ), cif_viewer_asset_version( 'assets/metrics.css' ) );
 	wp_register_script( 'cif-viewer-metrics', CIF_VIEWER_URL . 'assets/metrics-page.js', array( 'cif-viewer-app' ), cif_viewer_asset_version( 'assets/metrics-page.js' ), true );
 	wp_register_style( 'cif-viewer-symmetry-page', CIF_VIEWER_URL . 'assets/symmetry.css', array( 'cif-viewer-style' ), cif_viewer_asset_version( 'assets/symmetry.css' ) );
@@ -737,6 +738,7 @@ function cif_viewer_shortcode() {
 	wp_enqueue_script( 'cif-viewer-app' );
 	wp_enqueue_script( 'cif-viewer-amc2cif' );
 	wp_enqueue_script( 'cif-viewer-amc2cif-ui' );
+	wp_enqueue_script( 'cif-viewer-table2amc' );
 	wp_enqueue_script( 'cif-viewer-metrics' );
 
 	// The token stays on the server: the browser fetches records through the
@@ -783,6 +785,7 @@ function cif_viewer_shortcode() {
 					<div id="cifToAmcStatus"></div>
 					<textarea id="amcHeaderOutput" readonly rows="1"></textarea>
 					<button id="copyHeaderBtn" class="cif-viewer-btn" type="button">Copy</button>
+					<button id="editHeaderBtn" data-edits="amcHeaderOutput" class="cif-viewer-btn" type="button">Edit</button>
 					<button id="sendHeaderBtn" hidden class="cif-viewer-btn" type="button">Send</button>
 					<p id="crystalSystemDisplay"></p>
 					<div id="sendHeaderStatus" hidden></div>
@@ -805,15 +808,89 @@ function cif_viewer_shortcode() {
 					</label>
 					<div id="amcToCifStatus"></div>
 					<button id="copyAmcToCifBtn" class="cif-viewer-btn" type="button">Copy</button>
+					<button id="editAmcToCifBtn" data-edits="amcToCifOutput" class="cif-viewer-btn" type="button">Edit</button>
 					<textarea id="amcToCifOutput" readonly rows="1"></textarea>
 					<button id="sendAmcToCifBtn" class="cif-viewer-btn" type="button" disabled>Send</button>
 					<div id="sendAmcToCifStatus"></div>
+				</div>
+
+				<div id="tableToAmcSection">
+					<h3>Paper Table &rarr; AMC</h3>
+					<p class="table-intro">Paste an atom table copied from a paper. Several datasets can go in at once, each under its own title line (e.g. Phl1a), with a separate U(i,j) table after them if the paper has one.</p>
+
+					<div class="table-paste">
+						<div class="table-card-head">
+							<label for="tableInput">Atom table</label>
+							<span class="table-hint">header row included</span>
+						</div>
+						<textarea id="tableInput" rows="8" spellcheck="false" placeholder="Atom  x  y  z  Beq  B11  B22  B33  B12  B13  B23&#10;O1  0.0049(7)  0  0.1716(3)  2.30(8)  255(14)  49(4)  56(3)  0  2(5)  0&#10;M1  0  0  0.5  1.58(5)  121(7)  36(2)  56(2)  0  26(3)  0"></textarea>
+					</div>
+
+					<div class="table-cards">
+						<div class="table-card">
+							<div class="table-card-head">
+								<label for="tableCellInput">Cell parameters</label>
+								<span class="table-optional">optional</span>
+							</div>
+							<textarea id="tableCellInput" rows="3" spellcheck="false" placeholder="Phl1a 5.306(1) 9.195(3) 10.272(3) 90 100.01(2) 90 C2/m"></textarea>
+							<p class="table-hint">One line per dataset. Four numbers are a b c &beta;; a line with only a space group sets it for all.</p>
+						</div>
+						<div class="table-card">
+							<div class="table-card-head">
+								<label for="tableSiteInput">Site contents</label>
+								<span class="table-optional">optional</span>
+							</div>
+							<textarea id="tableSiteInput" rows="3" spellcheck="false" placeholder="T1 Si.85 Al.15&#10;M1 Li.35 Al.10 Fe2+.07 &#9633;.55"></textarea>
+							<p class="table-hint">What each site holds, from the paper's chemistry and text. Each site becomes one row per element.</p>
+						</div>
+						<div class="table-card">
+							<div class="table-card-head">
+								<label for="tableColumnsInput">Columns</label>
+								<span class="table-optional">optional</span>
+							</div>
+							<textarea id="tableColumnsInput" rows="1" spellcheck="false" placeholder="x y z Beq B11 B22 B33 B12 B13 B23"></textarea>
+							<p class="table-hint">Type the header when the pasted one comes out garbled; it replaces any header in the paste.</p>
+						</div>
+						<div class="table-card">
+							<div class="table-card-head">
+								<label for="tableHeaderInput">AMC header</label>
+								<span class="table-optional">from the record</span>
+							</div>
+							<textarea id="tableHeaderInput" rows="3" spellcheck="false" placeholder="Mineral name&#10;Authors&#10;Journal, volume, pages, year&#10;Title"></textarea>
+							<p class="table-hint">Filled from the record loaded with ?UUID=; edit as needed. It goes in front of every dataset.</p>
+						</div>
+					</div>
+
+					<details class="table-options">
+						<summary>Scale factors <span class="table-hint">set automatically for values with decimal points and for &beta;</span></summary>
+						<div class="table-scales">
+							<label>Coordinates &times; 10^<input type="number" id="tableXyzPower" value="4" min="0" max="9"></label>
+							<label>Isotropic &times; 10^<input type="number" id="tableIsoPower" value="3" min="0" max="9"></label>
+							<label>Anisotropic &times; 10^<input type="number" id="tableAnisoPower" value="3" min="0" max="9"></label>
+							<label><input type="checkbox" id="tableHexagonal"> Hexagonal or rhombohedral cell (when no cell is given)</label>
+						</div>
+					</details>
+
+					<div class="table-result">
+						<div class="table-result-head">
+							<span class="table-result-title">AMC</span>
+							<div class="table-result-buttons">
+								<button id="copyTableToAmcBtn" class="cif-viewer-btn" type="button">Copy</button>
+								<button id="downloadTableToAmcBtn" class="cif-viewer-btn" type="button">Download</button>
+								<button id="editTableToAmcBtn" data-edits="tableToAmcOutput" class="cif-viewer-btn" type="button">Edit</button>
+								<button id="discardTableToAmcEditsBtn" class="cif-viewer-btn" type="button" hidden>Discard edits</button>
+							</div>
+						</div>
+						<div id="tableToAmcStatus" class="table-notes"></div>
+						<textarea id="tableToAmcOutput" readonly rows="1"></textarea>
+					</div>
 				</div>
 
 				<div id="unitCellSection" hidden>
 					<h3>Unit Cell Atoms</h3>
 					<div id="unitCellStatus"></div>
 					<button id="copyUnitCellBtn" class="cif-viewer-btn" type="button">Copy</button>
+					<button id="editUnitCellBtn" data-edits="unitCellOutput" class="cif-viewer-btn" type="button">Edit</button>
 					<textarea id="unitCellOutput" readonly rows="1"></textarea>
 				</div>
 
@@ -823,6 +900,7 @@ function cif_viewer_shortcode() {
 					<textarea id="citationInput" rows="1"></textarea>
 					<button id="formatCitationBtn" class="cif-viewer-btn" type="button">Format</button>
 					<button id="copyCitationBtn" class="cif-viewer-btn" type="button">Copy</button>
+					<button id="editCitationBtn" data-edits="citationOutput" class="cif-viewer-btn" type="button">Edit</button>
 					<div id="citationStatus"></div>
 					<textarea id="citationOutput" readonly rows="1"></textarea>
 				</div>

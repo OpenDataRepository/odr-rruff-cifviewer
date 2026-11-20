@@ -36,6 +36,7 @@
         <div id="cifToAmcStatus"></div>
         <textarea id="amcHeaderOutput" readonly rows="1"></textarea>
         <button id="copyHeaderBtn">Copy</button>
+        <button id="editHeaderBtn" data-edits="amcHeaderOutput">Edit</button>
         <button id="sendHeaderBtn" hidden>Send</button>
         <p id="crystalSystemDisplay"></p>
         <div id="sendHeaderStatus" hidden></div>
@@ -58,15 +59,89 @@
         </label>
         <div id="amcToCifStatus"></div>
         <button id="copyAmcToCifBtn">Copy</button>
+        <button id="editAmcToCifBtn" data-edits="amcToCifOutput">Edit</button>
         <textarea id="amcToCifOutput" readonly rows="1"></textarea>
         <button id="sendAmcToCifBtn" disabled>Send</button>
         <div id="sendAmcToCifStatus"></div>
+      </div>
+
+      <div id="tableToAmcSection">
+        <h3>Paper Table &rarr; AMC</h3>
+        <p class="table-intro">Paste an atom table copied from a paper. Several datasets can go in at once, each under its own title line (e.g. Phl1a), with a separate U(i,j) table after them if the paper has one.</p>
+
+        <div class="table-paste">
+          <div class="table-card-head">
+            <label for="tableInput">Atom table</label>
+            <span class="table-hint">header row included</span>
+          </div>
+          <textarea id="tableInput" rows="8" spellcheck="false" placeholder="Atom  x  y  z  Beq  B11  B22  B33  B12  B13  B23&#10;O1  0.0049(7)  0  0.1716(3)  2.30(8)  255(14)  49(4)  56(3)  0  2(5)  0&#10;M1  0  0  0.5  1.58(5)  121(7)  36(2)  56(2)  0  26(3)  0"></textarea>
+        </div>
+
+        <div class="table-cards">
+          <div class="table-card">
+            <div class="table-card-head">
+              <label for="tableCellInput">Cell parameters</label>
+              <span class="table-optional">optional</span>
+            </div>
+            <textarea id="tableCellInput" rows="3" spellcheck="false" placeholder="Phl1a 5.306(1) 9.195(3) 10.272(3) 90 100.01(2) 90 C2/m"></textarea>
+            <p class="table-hint">One line per dataset. Four numbers are a b c &beta;; a line with only a space group sets it for all.</p>
+          </div>
+          <div class="table-card">
+            <div class="table-card-head">
+              <label for="tableSiteInput">Site contents</label>
+              <span class="table-optional">optional</span>
+            </div>
+            <textarea id="tableSiteInput" rows="3" spellcheck="false" placeholder="T1 Si.85 Al.15&#10;M1 Li.35 Al.10 Fe2+.07 &#9633;.55"></textarea>
+            <p class="table-hint">What each site holds, from the paper's chemistry and text. Each site becomes one row per element.</p>
+          </div>
+          <div class="table-card">
+            <div class="table-card-head">
+              <label for="tableColumnsInput">Columns</label>
+              <span class="table-optional">optional</span>
+            </div>
+            <textarea id="tableColumnsInput" rows="1" spellcheck="false" placeholder="x y z Beq B11 B22 B33 B12 B13 B23"></textarea>
+            <p class="table-hint">Type the header when the pasted one comes out garbled; it replaces any header in the paste.</p>
+          </div>
+          <div class="table-card">
+            <div class="table-card-head">
+              <label for="tableHeaderInput">AMC header</label>
+              <span class="table-optional">from the record</span>
+            </div>
+            <textarea id="tableHeaderInput" rows="3" spellcheck="false" placeholder="Mineral name&#10;Authors&#10;Journal, volume, pages, year&#10;Title"></textarea>
+            <p class="table-hint">Filled from the record loaded with ?UUID=; edit as needed. It goes in front of every dataset.</p>
+          </div>
+        </div>
+
+        <details class="table-options">
+          <summary>Scale factors <span class="table-hint">set automatically for values with decimal points and for &beta;</span></summary>
+          <div class="table-scales">
+            <label>Coordinates &times; 10^<input type="number" id="tableXyzPower" value="4" min="0" max="9"></label>
+            <label>Isotropic &times; 10^<input type="number" id="tableIsoPower" value="3" min="0" max="9"></label>
+            <label>Anisotropic &times; 10^<input type="number" id="tableAnisoPower" value="3" min="0" max="9"></label>
+            <label><input type="checkbox" id="tableHexagonal"> Hexagonal or rhombohedral cell (when no cell is given)</label>
+          </div>
+        </details>
+
+        <div class="table-result">
+          <div class="table-result-head">
+            <span class="table-result-title">AMC</span>
+            <div class="table-result-buttons">
+              <button id="copyTableToAmcBtn">Copy</button>
+              <button id="downloadTableToAmcBtn">Download</button>
+              <button id="editTableToAmcBtn" data-edits="tableToAmcOutput">Edit</button>
+              <button id="discardTableToAmcEditsBtn" hidden>Discard edits</button>
+            </div>
+          </div>
+          <div id="tableToAmcStatus" class="table-notes"></div>
+          <textarea id="tableToAmcOutput" readonly rows="1"></textarea>
+        </div>
       </div>
 
       <div id="unitCellSection" hidden>
         <h3>Unit Cell Atoms</h3>
         <div id="unitCellStatus"></div>
         <button id="copyUnitCellBtn">Copy</button>
+        <button id="editUnitCellBtn" data-edits="unitCellOutput">Edit</button>
         <textarea id="unitCellOutput" readonly rows="1"></textarea>
       </div>
 
@@ -76,6 +151,7 @@
         <textarea id="citationInput" rows="1"></textarea>
         <button id="formatCitationBtn">Format</button>
         <button id="copyCitationBtn">Copy</button>
+        <button id="editCitationBtn" data-edits="citationOutput">Edit</button>
         <div id="citationStatus"></div>
         <textarea id="citationOutput" readonly rows="1"></textarea>
       </div>
@@ -125,6 +201,7 @@
   <script src="app.js"></script>
   <script src="amc2cif.js"></script>
   <script src="amc2cif-ui.js"></script>
+  <script src="table2amc.js"></script>
   <script src="metrics-page.js"></script>
 </body>
 </html>
