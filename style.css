@@ -68,8 +68,227 @@ textarea {
   border: 1px solid var(--border);
 }
 
+/* Paper Table -> AMC: the paste box, the optional inputs as small cards,
+   the scale factors folded away, then the result with its notes. */
+.table-intro {
+  margin: 0 0 1rem;
+  color: #3d4b5c;
+  line-height: 1.5;
+}
+
+.table-paste,
+.table-card,
+.table-options,
+.table-result {
+  background: #ffffff;
+  border: 1px solid #dbe5f0;
+  border-radius: 14px;
+}
+
+.table-paste {
+  padding: 0.9rem 1rem 1rem;
+  margin-bottom: 0.9rem;
+}
+
+.table-cards {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.9rem;
+  margin-bottom: 0.9rem;
+}
+
+.table-card {
+  display: flex;
+  flex-direction: column;
+  padding: 0.8rem 1rem 0.85rem;
+}
+
+.table-card textarea {
+  flex: 1;
+  min-height: 5.6rem;
+}
+
+@media (max-width: 640px) {
+  .table-cards {
+    grid-template-columns: 1fr;
+  }
+}
+
+.table-card-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.45rem;
+}
+
+.table-card-head label {
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+
+.table-optional {
+  flex: none;
+  padding: 0.05rem 0.5rem;
+  border-radius: 999px;
+  background: #eef3f9;
+  color: #5b6b7d;
+  font-size: 0.75rem;
+}
+
+.table-hint {
+  margin: 0.45rem 0 0;
+  color: #5b6b7d;
+  font-size: 0.8rem;
+  font-weight: normal;
+  line-height: 1.4;
+}
+
+.table-card-head .table-hint {
+  margin: 0;
+}
+
+#tableToAmcSection textarea {
+  border-color: #cfd9e5;
+  border-radius: 8px;
+  padding: 0.5rem 0.6rem;
+  resize: vertical;
+}
+
+#tableToAmcSection textarea:focus {
+  outline: none;
+  border-color: #3b6fd8;
+  box-shadow: 0 0 0 3px rgba(59, 111, 216, 0.15);
+}
+
+#tableToAmcSection textarea::placeholder {
+  color: #9aa7b6;
+}
+
+.table-options {
+  padding: 0.6rem 1rem;
+  margin-bottom: 0.9rem;
+}
+
+.table-options summary {
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+
+.table-options summary .table-hint {
+  margin-left: 0.4rem;
+}
+
+.table-scales {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 1.25rem;
+  margin-top: 0.75rem;
+  font-size: 0.9rem;
+}
+
+.table-scales input[type="number"] {
+  width: 3.2rem;
+  margin-left: 0.15rem;
+}
+
+.table-result {
+  padding: 0.8rem 1rem 1rem;
+}
+
+.table-result-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.table-result-title {
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+
+.table-result-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.table-result-buttons button {
+  margin-bottom: 0;
+}
+
+.table-notes:empty {
+  display: none;
+}
+
+.table-notes {
+  margin-bottom: 0.6rem;
+  padding: 0.55rem 0.8rem;
+  border-radius: 8px;
+  background: #f6f8fb;
+  color: #3d4b5c;
+  font-size: 0.85rem;
+  line-height: 1.45;
+}
+
+.table-notes p {
+  margin: 0;
+  font-weight: 600;
+}
+
+.table-notes summary {
+  display: flex;
+  align-items: center;
+  font-weight: 600;
+  cursor: pointer;
+  list-style: none;
+}
+
+.table-notes summary::-webkit-details-marker {
+  display: none;
+}
+
+/* A chevron on the right, as on the section headers: up when open. */
+.table-notes summary::after {
+  content: '';
+  flex: none;
+  margin-left: auto;
+  width: 0.4em;
+  height: 0.4em;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: translateY(-0.1em) rotate(45deg);
+  transition: transform 0.15s;
+}
+
+.table-notes details[open] > summary::after {
+  transform: translateY(0.1em) rotate(-135deg);
+}
+
+.table-notes ul {
+  margin: 0.3rem 0 0;
+  padding-left: 1.2rem;
+}
+
+.table-notes.error {
+  background: #fdf0f0;
+  color: #9b2c2c;
+}
+
+/* An output box opened with its Edit button. */
+textarea.editing {
+  background: #fffbea;
+  border-color: #d4a72c;
+}
+
 #amcHeaderOutput,
 #amcToCifOutput,
+#tableToAmcOutput,
 #citationInput,
 #citationOutput {
   overflow-y: hidden;
@@ -356,4 +575,51 @@ button {
 
 @keyframes confirm-pop {
   from { transform: scale(0.96); opacity: 0; }
+}
+
+/* Collapsible sections (app.js setupCollapsibleSections): the title opens and
+   closes its section, with a chevron at its right end pointing down when the
+   section is closed and up when it is open. */
+.section-controls {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.section-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  cursor: pointer;
+  user-select: none;
+}
+
+.section-toggle::after {
+  content: '';
+  flex: none;
+  margin-left: auto;
+  margin-right: 0.25rem;
+  width: 0.45em;
+  height: 0.45em;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: translateY(0.1em) rotate(-135deg);
+  transition: transform 0.15s;
+}
+
+.collapsed > .section-toggle::after {
+  transform: translateY(-0.15em) rotate(45deg);
+}
+
+.collapsed > .section-toggle {
+  margin-bottom: 0;
+}
+
+.collapsed > .section-body {
+  display: none;
+}
+
+#panel > div.collapsed {
+  padding-bottom: 1.25rem;
 }

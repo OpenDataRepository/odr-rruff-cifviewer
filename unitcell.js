@@ -313,21 +313,69 @@ function formatAmount(n) {
   return s === '1' ? '' : s.replace(/^0\./, '.');
 }
 
+// The atom count of an IMA formula ("Ca_19_Fe^2+^Al_4_(Al_6_Fe^2+^_2_)([box]_4_)[box](SiO_4_)_10_
+// (Si_2_O_7_)_4_(OH)_10_"), H left out (AMC files often don't list it), or undefined when it
+// has no atoms. Close enough to pick a formula-unit scale, which is all it's for: a shared
+// site "(Fe,Mg,Al)_8_" counts as 8 atoms, a range "_1-2_" as its first end, vacancies
+// ([box]) as none, and a hydrate's "·2H_2_O" (or "*") multiplies what follows it.
+function idealAtomCount(formula) {
+  if (!formula) return undefined;
+  const text = String(formula).replace(/<[^>]*>/g, '').replace(/\^[^^]*\^/g, '').replace(/\[box\]|□/gi, '');
+  let total = 0;
+  for (const part of text.split(/[·*•]/)) {
+    const lead = part.match(/^\s*(\d*\.?\d+)/);
+    const stack = [0];
+    const re = /([A-Z][a-z]?)|([([{])|([)\]}])|_(\d*\.?\d+)(?:-\d*\.?\d+)?_|,[^()[\]{}]*?(?=[)\]}])/g;
+    // What the last term added, for a subscript that follows it to multiply.
+    let last = 0;
+    let m;
+    while ((m = re.exec(lead ? part.slice(lead[0].length) : part))) {
+      if (m[1]) { last = m[1] === 'H' ? 0 : 1; stack[stack.length - 1] += last; }
+      else if (m[2]) { stack.push(0); last = 0; }
+      else if (m[3] && stack.length > 1) { last = stack.pop(); stack[stack.length - 1] += last; }
+      else if (m[4]) { stack[stack.length - 1] += last * (parseFloat(m[4]) - 1); last = 0; }
+      // ",Mg,Al" in "(Fe,Mg,Al)": the other atoms sharing the site add nothing.
+    }
+    while (stack.length > 1) stack[stack.length - 2] += stack.pop();
+    total += stack[0] * (lead ? parseFloat(lead[1]) : 1);
+  }
+  return total > 0 ? total : undefined;
+}
+
+// How many formula units the cell holds (see chemistry). Each crystallographic site (one
+// listed atom and all its copies) has an order, its number of positions in the cell. With
+// an IMA ideal formula's atom count (H left out) and the number of symmetry operations,
+// Z is the divisor of that number whose formula comes closest to the ideal atom count, so
+// the formula reads at the IMA formula's scale (vesuvianite's Ca19 ..., not half of it);
+// ties go to the gcd of the orders, then the smaller divisor. Without one, Z is the gcd of
+// the orders (the smallest order, when the others are multiples of it, as in Diopside's 4,
+// 4, 8, 8, 8, 8 -> 4).
+function formulaUnits(orders, cellAtomCount, { symmetryCount, idealAtoms } = {}) {
+  const siteGcd = [...orders.values()].reduce(gcd, 0) || 1;
+  if (!(idealAtoms > 0) || !(cellAtomCount > 0) || !(symmetryCount > 0)) return siteGcd;
+  const misfit = d => Math.abs(Math.log(cellAtomCount / d / idealAtoms));
+  let best = 1;
+  for (let d = 2; d <= symmetryCount; d++) {
+    if (symmetryCount % d) continue;
+    const diff = misfit(d) - misfit(best);
+    if (diff < -1e-9 || (Math.abs(diff) <= 1e-9 && d === siteGcd)) best = d;
+  }
+  return best;
+}
+
 // The chemistry of a unit cell from its expanded atoms (as expandAtoms gives them) and cell:
 //  - cellCounts: each element's atoms in the cell, adding up occupancies (with the H atoms
 //    AMCSD counts that weren't located, see atomsOf), in the order the elements first appear
 //    in the atom list;
-//  - Z: how many formula units the cell holds. Each crystallographic site (one listed atom
-//    and all its copies) has an order, its number of positions in the cell; Z is the largest
-//    number that divides every order (the smallest order, when the others are multiples of it,
-//    as in Diopside's 4, 4, 8, 8, 8, 8 -> 4);
+//  - Z: how many formula units the cell holds, see formulaUnits; `scale` is
+//    { symmetryCount, idealFormula } when the IMA ideal formula is known;
 //  - formula: cellCounts / Z, as AMCSD writes _chemical_formula_sum ("Mg.91 Fe.1 ... O6"),
 //    leaving out trace elements that round to 0;
 //  - volume (A3): the square root of the metric tensor's determinant;
 //  - density (g/cm3): the cell's mass over its volume.
 // Labels with no element (`unknown`) are left out of the formula, and then no density is
 // given (it would be too low).
-function chemistry(expanded, cell) {
+function chemistry(expanded, cell, { symmetryCount, idealFormula } = {}) {
   const cellCounts = new Map();
   const unknown = new Set();
   const orders = new Map();
@@ -338,7 +386,9 @@ function chemistry(expanded, cell) {
     const occ = Number.isFinite(atom.occ) ? atom.occ : 1;
     for (const [element, count] of parts) cellCounts.set(element, (cellCounts.get(element) || 0) + count * occ);
   }
-  const Z = [...orders.values()].reduce(gcd, 0) || 1;
+  // H and D (deuterium) left out, like idealAtomCount's H.
+  const cellAtomCount = [...cellCounts].filter(([el]) => el !== 'H' && el !== 'D').reduce((sum, [, n]) => sum + n, 0);
+  const Z = formulaUnits(orders, cellAtomCount, { symmetryCount, idealAtoms: idealAtomCount(idealFormula) });
   const formula = [...cellCounts].filter(([, n]) => formatAmount(n / Z) !== '0').map(([el, n]) => el + formatAmount(n / Z)).join(' ');
   const G = metricTensor(cell);
   const [[a, b, c], [d, e, f], [g, h, i]] = G;
@@ -358,7 +408,7 @@ function chemistryCifLines(chem) {
   return [top, bottom];
 }
 
-return { NEAR, SAME, ATOMIC_MASS, chemistryCifLines, roundingError, writtenPlaces, expandAtoms, rotateAniso, mergeSharedSites, formatCoordinate, formatTable, elementOf, atomsOf, chemistry };
+return { NEAR, SAME, ATOMIC_MASS, chemistryCifLines, roundingError, writtenPlaces, expandAtoms, rotateAniso, mergeSharedSites, formatCoordinate, formatTable, elementOf, atomsOf, chemistry, idealAtomCount };
 })();
 
 if (typeof module !== 'undefined') module.exports = UnitCell;
