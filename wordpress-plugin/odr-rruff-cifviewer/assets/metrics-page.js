@@ -7,7 +7,31 @@
 // --- The counts, in groups. Each metric is a filter on the rows: its count is how many rows
 // pass it, out of the rows its `of` filter passes (all rows when there's none). ---
 const has = v => v !== undefined && v !== null;
+// Net charge per formula unit, as the mineral calc works it out for the record (netCharge in
+// metrics.json); a charge this close to 0 counts as balanced.
+const BALANCED = 0.0005;
+// Native elements (every element positive-only, nothing to balance against) have a charge too
+// but are kept out of the chart and the balance counts.
+const charged = r => has(r.netCharge) && !r.nativeElement;
 const GROUPS = [
+  {
+    title: 'Charge balance',
+    histogram: true,
+    metrics: [
+      { id: 'chargeAll', label: 'Charge calculated', test: r => has(r.netCharge) },
+      { id: 'chargeCalculated', label: 'Compounds', test: charged, of: 'chargeAll', hint: 'Everything but native elements: the chart and the counts after this one are of these' },
+      { id: 'chargeBalanced', label: 'Balanced', test: r => charged(r) && Math.abs(r.netCharge) <= BALANCED, of: 'chargeCalculated' },
+      { id: 'chargeUnbalanced', label: 'Not balanced', test: r => charged(r) && Math.abs(r.netCharge) > BALANCED, of: 'chargeCalculated' },
+      { id: 'chargeWithinHalf', label: 'Within ±0.5', test: r => charged(r) && Math.abs(r.netCharge) <= 0.5, of: 'chargeCalculated' },
+      { id: 'chargeOverOne', label: 'Off by more than 1', test: r => charged(r) && Math.abs(r.netCharge) > 1, of: 'chargeCalculated' },
+      { id: 'chargeNegative', label: 'More than 1 too negative', test: r => charged(r) && r.netCharge < -1, of: 'chargeOverOne' },
+      { id: 'chargePositive', label: 'More than 1 too positive', test: r => charged(r) && r.netCharge > 1, of: 'chargeOverOne' },
+      { id: 'chargeWithIma', label: 'With an IMA formula', test: r => charged(r) && !r.chargeWithoutIma, of: 'chargeCalculated' },
+      { id: 'chargeWithoutIma', label: 'Without an IMA formula', test: r => charged(r) && r.chargeWithoutIma === true, of: 'chargeCalculated', hint: 'No linked IMA mineral (mostly synthetic compounds): the cell is divided by its site-multiplicity gcd and valences have no IMA limits' },
+      { id: 'chargeNative', label: 'Native elements', test: r => has(r.netCharge) && r.nativeElement === true, of: 'chargeAll', hint: 'Every element has only positive valences (metals, alloys, carbides like SiC), so the charge is never 0; not in the chart' },
+      { id: 'chargeOther', label: 'Not calculated', test: r => has(r.chargeSkipped), hint: 'No readable AMC file or Chemistry, or not in the database pull' },
+    ],
+  },
   {
     title: 'Computed chemical formula',
     note: 'The formula from the unit cell (sum of occupancies over every position, divided by Z), as AMC → CIF writes it.',
@@ -66,6 +90,94 @@ const HIDDEN = [
 ];
 const METRICS = new Map([...GROUPS.flatMap(g => g.metrics), ...HIDDEN].filter(m => m.id).map(m => [m.id, m]));
 
+// --- The net charge histogram: bins 0.05 wide, centred on multiples of 0.05 (the 0 bin is
+// -0.025 to +0.025), across ±range, with one bar each for everything below and above. ---
+const BIN = 0.05;
+const CHARGE_RANGES = [0.5, 1, 2, 5];
+const chart = { range: 0.5, log: true };
+const binOf = x => Math.round(x / BIN);
+const edge = k => (k * BIN).toFixed(3);
+
+// A filter for one bar ("charge:<k>", "charge:below:<range>" or "charge:above:<range>").
+function chargeBinFilter(id) {
+  const [, a, b] = id.split(':');
+  if (a === 'below') return { label: `Net charge below ${edge(-binOf(+b) - 0.5)}`, test: r => charged(r) && binOf(r.netCharge) < -binOf(+b) };
+  if (a === 'above') return { label: `Net charge above ${edge(binOf(+b) + 0.5)}`, test: r => charged(r) && binOf(r.netCharge) > binOf(+b) };
+  const k = +a;
+  return { label: `Net charge ${edge(k - 0.5)} to ${edge(k + 0.5)}`, test: r => charged(r) && binOf(r.netCharge) === k };
+}
+const filterOf = id => (id.startsWith('charge:') ? chargeBinFilter(id) : METRICS.get(id));
+
+function renderHistogram(box) {
+  const kmax = binOf(chart.range);
+  const counts = new Map();
+  let below = 0, above = 0;
+  for (const r of state.rows) {
+    if (!charged(r)) continue;
+    const k = binOf(r.netCharge);
+    if (k < -kmax) below++;
+    else if (k > kmax) above++;
+    else counts.set(k, (counts.get(k) || 0) + 1);
+  }
+  const bars = [{ id: `charge:below:${chart.range}`, n: below, outside: true }];
+  for (let k = -kmax; k <= kmax; k++) bars.push({ id: `charge:${k}`, n: counts.get(k) || 0 });
+  bars.push({ id: `charge:above:${chart.range}`, n: above, outside: true });
+
+  const W = 1000, H = 300, L = 56, R = 8, T = 10, B = 42, pw = W - L - R, ph = H - T - B;
+  const slot = pw / (bars.length + 2); // a slot's gap each side of the two outside bars
+  const x = i => L + (i + (i > 0) + (i === bars.length - 1)) * slot;
+  const max = Math.max(1, ...bars.map(b => b.n));
+  const y = chart.log ? n => T + ph - (ph * Math.log10(n + 1)) / Math.log10(max + 1) : n => T + ph - (ph * n) / max;
+  const ticks = chart.log ? [1, 10, 100, 1000, 10000].filter(t => t <= max) : niceTicks(max);
+  const step = { 0.5: 0.1, 1: 0.25, 2: 0.5, 5: 1 }[chart.range];
+  const parts = [];
+  for (const t of ticks) parts.push(`<line class="grid" x1="${L}" x2="${W - R}" y1="${y(t)}" y2="${y(t)}"/><text class="axis" x="${L - 6}" y="${y(t) + 4}" text-anchor="end">${t.toLocaleString()}</text>`);
+  for (let v = -chart.range; v <= chart.range + 1e-9; v += step) {
+    const cx = x(binOf(v) + kmax + 1) + slot / 2;
+    parts.push(`<line class="grid" x1="${cx}" x2="${cx}" y1="${T + ph}" y2="${T + ph + 4}"/><text class="axis" x="${cx}" y="${T + ph + 18}" text-anchor="middle">${+v.toFixed(2)}</text>`);
+  }
+  parts.push(`<text class="axis" x="${x(0) + slot / 2}" y="${T + ph + 18}" text-anchor="middle">below</text>`);
+  parts.push(`<text class="axis" x="${x(bars.length - 1) + slot / 2}" y="${T + ph + 18}" text-anchor="middle">above</text>`);
+  parts.push(`<text class="axis" x="${L + pw / 2}" y="${H - 4}" text-anchor="middle">net charge per formula unit</text>`);
+  const zero = x(kmax + 1) + slot / 2;
+  parts.push(`<line class="zero" x1="${zero}" x2="${zero}" y1="${T}" y2="${T + ph}"/>`);
+  bars.forEach((b, i) => {
+    const label = filterOf(b.id).label;
+    const top = b.n ? y(b.n) : T + ph;
+    parts.push(`<g class="bin${b.outside ? ' outside' : ''}${state.filter === b.id ? ' active' : ''}" data-filter="${b.id}"><title>${label}: ${b.n.toLocaleString()}</title>`
+      + `<rect class="hit" x="${x(i)}" y="${T}" width="${slot}" height="${ph}"/>`
+      + (b.n ? `<rect class="bar" x="${x(i) + 1}" y="${top}" width="${Math.max(1, slot - 2)}" height="${T + ph - top}" rx="1"/>` : '')
+      + '</g>');
+  });
+  box.querySelector('svg').innerHTML = parts.join('');
+  box.querySelectorAll('.bin').forEach(g => g.addEventListener('click', () => {
+    setFilter(g.dataset.filter);
+    $('metricsExplorer').scrollIntoView({ behavior: 'smooth' });
+  }));
+  const seg = (id, items, get, set) => {
+    const el = box.querySelector(id);
+    el.innerHTML = '';
+    for (const [label, value] of items) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.textContent = label;
+      button.classList.toggle('on', get() === value);
+      button.addEventListener('click', () => { set(value); renderHistogram(box); });
+      el.appendChild(button);
+    }
+  };
+  seg('.ranges', CHARGE_RANGES.map(r => [`±${r}`, r]), () => chart.range, v => { chart.range = v; });
+  seg('.scales', [['Log', true], ['Linear', false]], () => chart.log, v => { chart.log = v; });
+}
+
+function niceTicks(max) {
+  const raw = max / 4, mag = 10 ** Math.floor(Math.log10(raw));
+  const step = [1, 2, 5, 10].map(m => m * mag).find(m => m >= raw);
+  const out = [];
+  for (let t = 0; t <= max; t += step) out.push(t);
+  return out;
+}
+
 // --- Table columns ---
 const fmt = v => (v === true ? 'yes' : v === false ? 'no' : has(v) ? String(v) : '');
 const COLUMNS = [
@@ -81,6 +193,7 @@ const COLUMNS = [
   { key: 'volume', label: 'Volume', cls: 'num', bad: r => r.volumeMatch === false },
   { key: 'density', label: 'Density', cls: 'num', bad: r => r.densityMatch === false },
   { key: 'cifVsAmc', label: 'CIF vs AMC', bad: r => r.cifVsAmc && r.cifVsAmc !== 'same' },
+  { key: 'netCharge', label: 'Net charge', cls: 'num', bad: r => has(r.netCharge) && Math.abs(r.netCharge) > BALANCED },
 ];
 // Every field, in order, for the detail view.
 const DETAIL_FIELDS = [
@@ -92,10 +205,11 @@ const DETAIL_FIELDS = [
   ['volume', 'Volume'], ['amcsdVolume', 'AMCSD volume'], ['volumeMatch', 'Volume matches'],
   ['density', 'Density'], ['amcsdDensity', 'AMCSD density'], ['densityMatch', 'Density matches'],
   ['unknown', 'Labels with no element'], ['cifVsAmc', 'CIF vs AMC'], ['cifVsAmcDetail', 'CIF vs AMC detail'], ['error', 'Error'],
+  ['netCharge', 'Net charge'], ['chargeFormula', 'Formula the charge is from'], ['cationCharge', 'Total cation charge'], ['chargeWithoutIma', 'Charge without an IMA formula'], ['nativeElement', 'Native element'], ['chargeSkipped', 'Charge not calculated'],
 ];
 
 const PAGE_SIZE = 100;
-const state = { rows: [], filter: '', search: '', sort: null, desc: false, page: 0 };
+const state = { rows: [], filter: '', search: '', sort: null, desc: false, page: 0, tab: 0 };
 const $ = id => document.getElementById(id);
 
 function count(id) {
@@ -103,16 +217,40 @@ function count(id) {
   return state.rows.filter(m.test).length;
 }
 
+// One group at a time, picked from tabs above it (the first, Charge balance, to start), so
+// the table of structures sits right under the counts and chart that filter it.
 function renderSummary() {
   const summary = $('metricsSummary');
   summary.innerHTML = '';
-  for (const group of GROUPS) {
+  const tabs = document.createElement('div');
+  tabs.className = 'metricsTabs';
+  tabs.setAttribute('role', 'tablist');
+  GROUPS.forEach((group, i) => {
+    const tab = document.createElement('button');
+    tab.type = 'button';
+    tab.setAttribute('role', 'tab');
+    tab.setAttribute('aria-selected', i === state.tab);
+    tab.textContent = group.title;
+    tab.addEventListener('click', () => { state.tab = i; renderSummary(); });
+    tabs.appendChild(tab);
+  });
+  summary.appendChild(tabs);
+  for (const group of [GROUPS[state.tab]]) {
     const section = document.createElement('section');
     section.className = 'group';
     section.innerHTML = `<h2></h2><p></p><div class="cards"></div>`;
     section.querySelector('h2').textContent = group.title;
-    section.querySelector('p').textContent = group.note;
+    if (group.note) section.querySelector('p').textContent = group.note;
+    else section.querySelector('p').remove();
     const cards = section.querySelector('.cards');
+    if (group.histogram) {
+      const box = document.createElement('div');
+      box.className = 'chargeHistogram';
+      box.innerHTML = '<div class="chartControls">Range <span class="seg ranges"></span> Count scale <span class="seg scales"></span></div>'
+        + '<svg viewBox="0 0 1000 300" role="img" aria-label="Histogram of net charge per formula unit"></svg>';
+      section.insertBefore(box, cards);
+      renderHistogram(box);
+    }
     for (const m of group.metrics) {
       const card = document.createElement('button');
       card.type = 'button';
@@ -130,6 +268,7 @@ function renderSummary() {
     }
     summary.appendChild(section);
   }
+  summary.querySelectorAll('.card, .bin').forEach(c => c.classList.toggle('active', c.dataset.filter === state.filter));
 }
 
 function renderFilterOptions() {
@@ -146,15 +285,19 @@ function renderFilterOptions() {
 function setFilter(id) {
   state.filter = id;
   state.page = 0;
-  $('metricsFilter').value = id;
-  document.querySelectorAll('#metricsView .card').forEach(c => c.classList.toggle('active', c.dataset.filter === id));
+  const select = $('metricsFilter');
+  // A histogram bar's filter gets its own option while it's picked.
+  select.querySelectorAll('option.bin').forEach(o => o.remove());
+  if (id.startsWith('charge:')) select.appendChild(Object.assign(new Option(filterOf(id).label, id), { className: 'bin' }));
+  select.value = id;
+  document.querySelectorAll('#metricsView .card, #metricsView .bin').forEach(c => c.classList.toggle('active', c.dataset.filter === id));
   renderTable();
 }
 
 function visibleRows() {
   const q = state.search.trim().toLowerCase();
   let rows = state.rows;
-  if (state.filter) rows = rows.filter(METRICS.get(state.filter).test);
+  if (state.filter) rows = rows.filter(filterOf(state.filter).test);
   if (q) rows = rows.filter(r => [r.id, r.name, r.formula, r.amcsdFormula, r.sg].some(v => v && String(v).toLowerCase().includes(q)));
   if (state.sort) {
     const k = state.sort, dir = state.desc ? -1 : 1;
@@ -172,7 +315,7 @@ function renderTable() {
   const rows = visibleRows();
   const pages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
   state.page = Math.min(state.page, pages - 1);
-  const label = state.filter ? METRICS.get(state.filter).label : 'All structures';
+  const label = state.filter ? filterOf(state.filter).label : 'All structures';
   $('metricsResultCount').textContent = `${label}: ${rows.length.toLocaleString()} structure${rows.length === 1 ? '' : 's'}${state.search.trim() ? ` matching "${state.search.trim()}"` : ''}`;
   $('metricsPageInfo').textContent = `Page ${state.page + 1} of ${pages}`;
   $('metricsPrevPage').disabled = state.page === 0;
