@@ -79,6 +79,126 @@
   font-size: 0.85rem;
 }
 
+/* Tabs that pick which group of counts is shown. */
+#metricsView .metricsTabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-bottom: 0.6rem;
+}
+
+#metricsView .metricsTabs button {
+  font: inherit;
+  font-size: 0.9rem;
+  margin: 0;
+  padding: 0.35rem 0.9rem;
+  border: 1px solid var(--m-border);
+  border-radius: 999px;
+  background: var(--m-bg);
+  color: inherit;
+  cursor: pointer;
+}
+
+#metricsView .metricsTabs button:hover {
+  border-color: var(--m-accent);
+}
+
+#metricsView .metricsTabs button[aria-selected="true"] {
+  background: var(--m-accent);
+  border-color: var(--m-accent);
+  color: #ffffff;
+}
+
+/* The net charge histogram, above the Charge balance cards. */
+#metricsView .chargeHistogram {
+  background: var(--m-bg);
+  border: 1px solid var(--m-border);
+  border-radius: 10px;
+  padding: 0.6rem 0.8rem;
+  margin-bottom: 0.75rem;
+}
+
+#metricsView .chartControls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem 0.6rem;
+  font-size: 0.85rem;
+  color: var(--m-muted);
+}
+
+#metricsView .chartControls .seg {
+  display: inline-flex;
+  margin-right: 0.8rem;
+}
+
+#metricsView .chartControls .seg button {
+  font: inherit;
+  margin: 0;
+  padding: 0.15rem 0.6rem;
+  border: 1px solid var(--m-border);
+  border-radius: 0;
+  background: var(--m-bg);
+  color: inherit;
+  cursor: pointer;
+}
+
+#metricsView .chartControls .seg button + button {
+  border-left: none;
+}
+
+#metricsView .chartControls .seg button:first-child { border-radius: 6px 0 0 6px; }
+#metricsView .chartControls .seg button:last-child { border-radius: 0 6px 6px 0; }
+
+#metricsView .chartControls .seg button.on {
+  background: var(--m-accent);
+  border-color: var(--m-accent);
+  color: #ffffff;
+}
+
+#metricsView .chargeHistogram svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  margin-top: 0.4rem;
+}
+
+#metricsView .chargeHistogram .axis {
+  fill: var(--m-muted);
+  font-size: 11px;
+}
+
+#metricsView .chargeHistogram .grid {
+  stroke: var(--m-border);
+  stroke-width: 1;
+}
+
+#metricsView .chargeHistogram .zero {
+  stroke: var(--m-muted);
+  stroke-dasharray: 3 3;
+}
+
+#metricsView .chargeHistogram .hit {
+  fill: transparent;
+}
+
+#metricsView .chargeHistogram .bin {
+  cursor: pointer;
+}
+
+#metricsView .chargeHistogram .bar {
+  fill: var(--m-accent);
+}
+
+#metricsView .chargeHistogram .outside .bar {
+  fill: #90b4dc;
+}
+
+#metricsView .chargeHistogram .bin:hover .bar,
+#metricsView .chargeHistogram .bin.active .bar {
+  fill: #1a4472;
+}
+
 #metricsExplorer {
   margin-top: 1.5rem;
 }
