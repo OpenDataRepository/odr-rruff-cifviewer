@@ -2,7 +2,7 @@
 /**
  * Plugin Name: ODR RRUFF CIF Viewer
  * Description: Reads a CIF and creates the AMC header
- * Version: 1.2.0
+ * Version: 1.2.1
  * Author: Nathan
  */
 
@@ -10,7 +10,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'CIF_VIEWER_VERSION', '1.2.0' );
+define( 'CIF_VIEWER_VERSION', '1.2.1' );
 define( 'CIF_VIEWER_URL', plugin_dir_url( __FILE__ ) );
 define( 'CIF_VIEWER_TOKEN_URL', 'https://www.rruff.net/odr_rruff/api/v4/token' );
 define( 'CIF_VIEWER_RECORD_URL', 'https://www.rruff.net/odr_rruff/api/v4/dataset/record/' );
@@ -750,6 +750,8 @@ function cif_viewer_shortcode() {
 		'restNonce'      => wp_create_nonce( 'wp_rest' ),
 		// The metrics view's data (scripts/metrics.js), put in the plugin's data/ folder.
 		'metricsUrl'     => CIF_VIEWER_URL . 'data/metrics.json',
+		// The net charges for the metrics view's Charge balance tab (scripts/net_charge.mjs), committed.
+		'netChargeUrl'   => CIF_VIEWER_URL . 'data/net_charge.json',
 	);
 	wp_localize_script( 'cif-viewer-app', 'odrRruffCifViewer', $config );
 
