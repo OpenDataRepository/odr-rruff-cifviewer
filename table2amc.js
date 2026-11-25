@@ -154,17 +154,7 @@ const LABEL_COLUMN_RE = /^(atom|atoms|site|sites|label|name)$/i;
 
 function readPaperHeader(tokens) {
   if (tokens.length && LABEL_COLUMN_RE.test(tokens[0])) tokens = tokens.slice(1);
-  // A scan often misreads the italic x, y and z ("ae y eZ B", "rda yfo z/c"):
-  // when the three words before the other columns aren't all read as x, y
-  // and z but one of them is, and the rest read as columns, they are taken
-  // as x y z.
-  const axes = tokens.slice(0, 3).map(scannedColumn);
-  const isAxis = (c, k) => c && c.kind === k;
-  const scanned = tokens.length >= 3 && !['x', 'y', 'z'].every((k, i) => isAxis(axes[i], k))
-    && ['x', 'y', 'z'].some((k, i) => isAxis(axes[i], k) || /^[xyz]/i.test(tokens[i]))
-    && tokens.slice(0, 3).every(t => t.length <= 4) && tokens.slice(3).every(scannedColumn);
-  if (scanned) tokens = ['x', 'y', 'z', ...tokens.slice(3)];
-  const columns = tokens.map(scannedColumn).filter(Boolean);
+  const columns = headerWords(tokens).map(scannedColumn).filter(Boolean);
   const kinds = new Set(columns.map(c => c.kind));
   const hasXyz = ['x', 'y', 'z'].every(k => kinds.has(k));
   const terms = new Set(columns.filter(c => c.kind === 'aniso').map(c => c.ij));
@@ -172,6 +162,23 @@ function readPaperHeader(tokens) {
   // Half a set of U(i,j) can't be told apart from a row of numbers, so it is left out.
   const usable = terms.size === 6 ? columns : columns.filter(c => c.kind !== 'aniso');
   return { columns: usable, hasXyz };
+}
+
+// A header's column words (without the label column's), with a scan's
+// misread x y z put right. The column grid reads headers the same way.
+function headerWords(tokens) {
+  // A scan often misreads the italic x, y and z ("ae y eZ B", "rda yfo z/c"):
+  // when the three words before the other columns aren't all read as x, y
+  // and z but one of them is, and the rest read as columns, they are taken
+  // as x y z.
+  const axes = tokens.slice(0, 3).map(scannedColumn);
+  const isAxis = (c, k) => c && c.kind === k;
+  // x, y and z read cleanly in another order ("y x z", columns picked that way) are kept as they are.
+  const cleanAxes = new Set(axes.filter(c => c && ['x', 'y', 'z'].includes(c.kind)).map(c => c.kind)).size === 3;
+  const scanned = tokens.length >= 3 && !cleanAxes
+    && ['x', 'y', 'z'].some((k, i) => isAxis(axes[i], k) || /^[xyz]/i.test(tokens[i]))
+    && tokens.slice(0, 3).every(t => t.length <= 4) && tokens.slice(3).every(scannedColumn);
+  return scanned ? ['x', 'y', 'z', ...tokens.slice(3)] : tokens;
 }
 
 // Without a header, every column a row could have; rowColumns keeps the ones
@@ -276,11 +283,23 @@ const sameTitle = (a, b) => a.toLowerCase() === b.toLowerCase();
 // Every dataset in the pasted text, as [{ title, atoms: [{ label, values: {
 // x, y, z, iso, occ, aniso: { ij: token } } }], isoConvention, anisoConvention }],
 // plus notes worth telling the user.
-function readPaperTables(text, powers, columnsText = '') {
+// A line that is an atom row with values that can't be read ("M 3375(1) 0 8(1)0"):
+// a label, then mostly values. Its unreadable tokens, or null when it isn't one.
+function brokenAtomRow(tokens) {
+  if (tokens.length < 4 || isPaperValue(tokens[0]) || LABEL_COLUMN_RE.test(tokens[0])) return null;
+  const rest = tokens.slice(1);
+  const bad = rest.filter(t => !isPaperValue(t));
+  return bad.length && rest.length - bad.length >= 2 && (rest.length - bad.length) * 2 >= rest.length ? bad : null;
+}
+
+// anisoText is a separate U(i,j) table pasted on its own, with its columns in
+// anisoColumnsText (the six terms, in the paper's order); its rows add to the
+// atoms of the same labels, as a second header in the main paste does.
+function readPaperTables(text, powers, columnsText = '', anisoText = '', anisoColumnsText = '') {
   const datasets = [];
   const notes = [];
   // Columns the user typed replace any header in the paste.
-  const typed = columnsText.trim() ? readPaperHeader(paperTableTokens(columnsText)) : null;
+  let typed = columnsText.trim() ? readPaperHeader(paperTableTokens(columnsText)) : null;
   if (columnsText.trim() && !typed) notes.push(`Couldn't read the columns "${columnsText.trim()}"; they need x y z (e.g. x y z Beq B11 B22 B33 B12 B13 B23).`);
   let header = typed;
   let current = null;
@@ -302,9 +321,9 @@ function readPaperTables(text, powers, columnsText = '') {
     return found || { skip: true };
   };
 
-  for (const line of text.replace(/\r\n?/g, '\n').split('\n')) {
+  const readLine = line => {
     const tokens = paperTableTokens(line);
-    if (!tokens.length) continue;
+    if (!tokens.length) return;
 
     // A scan reads the label O2 as "02": a leading-zero number followed by a
     // full row of values is taken as an oxygen.
@@ -317,7 +336,7 @@ function readPaperTables(text, powers, columnsText = '') {
     if (row) {
       if (!header) {
         header = { columns: DEFAULT_PAPER_COLUMNS, hasXyz: true };
-        if (!warnedNoHeader) notes.push('No header row found, so the columns were worked out from the number of values (x y z, then the isotropic value, the six anisotropic terms, the occupancy); type them under Columns if that is wrong.');
+        if (!warnedNoHeader) notes.push('No header row found: the column names were guessed from how many values each row has (x y z, then Uiso, U11 to U23, occupancy); check them above the table.');
         warnedNoHeader = true;
       }
       // The same label again under coordinates starts the next dataset (a
@@ -331,18 +350,18 @@ function readPaperTables(text, powers, columnsText = '') {
         if (header.columns === DEFAULT_PAPER_COLUMNS) current.guessedColumns = true;
       }
       pendingTitle = '';
-      if (current.skip) continue;
+      if (current.skip) return;
       const { label, values, dropped } = row;
       if (dropped.length) notes.push(`"${tokens.slice(0, tokens.length - values.length).join(' ')}" was read as the label ${label}.`);
       const columns = rowColumns(header.columns, values, powers);
       if (!columns) {
         notes.push(`${label}${current.title ? ` (${current.title})` : ''} has ${values.length} values, which doesn't fit the header's columns; it was left out.`);
-        continue;
+        return;
       }
       let atom = current.atoms.find(a => a.label === label);
       if (!header.hasXyz && !atom) {
         notes.push(`${label}${current.title ? ` (${current.title})` : ''} has U(i,j) but no coordinates; it was left out.`);
-        continue;
+        return;
       }
       if (!atom) {
         atom = {
@@ -363,7 +382,7 @@ function readPaperTables(text, powers, columnsText = '') {
           if (column.kind === 'iso') current.isoConvention = current.isoConvention || column.convention;
         }
       });
-      continue;
+      return;
     }
 
     const newHeader = readPaperHeader(tokens);
@@ -372,23 +391,31 @@ function readPaperTables(text, powers, columnsText = '') {
       current = null;
       pendingTitle = '';
       supplementGroup = -1;
-      continue;
+      return;
     }
 
     // A header row too garbled to read ("Atom ...") isn't a dataset title;
     // the columns are worked out from the rows (or typed under Columns).
     if (LABEL_COLUMN_RE.test(tokens[0]) && tokens.length >= 4) {
-      if (!typed) notes.push(`Couldn't read the header "${line.trim()}"; type it under Columns if the values come out in the wrong places.`);
+      if (!typed) notes.push(`Couldn't read the header "${line.trim()}"; choose the columns above the table if the values come out in the wrong places.`);
       current = null;
       pendingTitle = '';
-      continue;
+      return;
+    }
+
+    // An atom row with a value that can't be read ("8(1)0") is pointed out
+    // rather than taken for a dataset title, which would lose the row.
+    const bad = brokenAtomRow(tokens);
+    if (bad) {
+      notes.push(`${tokens[0]}: couldn't read ${bad.map(t => `"${t}"`).join(', ')} as ${bad.length === 1 ? 'a number' : 'numbers'}, so the row was left out; fix ${bad.length === 1 ? 'it' : 'them'} in the table (marked red).`);
+      return;
     }
 
     // A row whose label reads as a number (a scan's "01" for O1) can't be told
     // from a row of values, so it is pointed out rather than guessed at.
     if (header && tokens.length >= 4 && tokens.every(isPaperValue)) {
       notes.push(`"${line.trim()}" starts with a number, not an atom label; it was left out.`);
-      continue;
+      return;
     }
 
     // A footnote giving the occupancy of marked atoms ("Occupancies: * =
@@ -404,13 +431,29 @@ function readPaperTables(text, powers, columnsText = '') {
           notes.push(`${atom.label} has occupancy ${occ}, from the footnote.`);
         }
       }
-      continue;
+      return;
     }
 
     // A caption, a footnote, or a dataset title: whichever line comes last
     // before a block of rows titles it.
     current = null;
     pendingTitle = cleanTitle(line);
+  };
+
+  text.replace(/\r\n?/g, '\n').split('\n').forEach(readLine);
+
+  if (anisoText.trim()) {
+    const columns = anisoColumnsText.trim() || AMC_ANISO_ORDER.map(ij => `U${ij}`).join(' ');
+    typed = readPaperHeader(paperTableTokens(columns));
+    if (!typed || typed.hasXyz) {
+      notes.push(`Couldn't read the U(i,j) table's columns "${columns}"; they need the six terms (e.g. U11 U22 U33 U23 U13 U12).`);
+    } else {
+      header = typed;
+      current = null;
+      pendingTitle = '';
+      supplementGroup = -1;
+      anisoText.replace(/\r\n?/g, '\n').split('\n').forEach(readLine);
+    }
   }
 
   // Without a header, U or B is told from the isotropic values: a U is a few
@@ -434,8 +477,12 @@ function readPaperTables(text, powers, columnsText = '') {
 // title, six numbers (or a b c beta, for a monoclinic cell), then the space
 // group in AMC form. A line holding only a space group gives every dataset
 // that space group. Returns { byTitle: [{ title, cell }], shared, spaceGroup }.
+// A space group starred for a shifted origin ("*Fd-3m", as AMCSD writes it)
+// takes the shift from the next line, three values ("1/8 1/8 1/8" or ".125 .125
+// .125"), which is kept as `shift` and written after the cell line.
 function readCellLines(text) {
   const result = { byTitle: [], shared: null, spaceGroup: '', notes: [] };
+  let lastCell = null;
   for (const line of text.replace(/\r\n?/g, '\n').split('\n')) {
     const tokens = paperTableTokens(line);
     if (!tokens.length) continue;
@@ -443,13 +490,20 @@ function readCellLines(text) {
     if (first === -1) {
       if (tokens.length === 1) result.spaceGroup = tokens[0];
       else result.notes.push(`Couldn't read the cell line "${line.trim()}".`);
+      lastCell = null;
+      continue;
+    }
+    if (first === 0 && tokens.length === 3 && tokens.every(isPaperValue) && lastCell && lastCell.spaceGroup.startsWith('*')) {
+      lastCell.shift = tokens.join(' ');
+      lastCell = null;
       continue;
     }
     let last = first;
     while (last < tokens.length && isPaperValue(tokens[last])) last++;
     const numbers = tokens.slice(first, last).map(t => t.replace(/\(\d+\)$/, ''));
     const title = cleanTitle(tokens.slice(0, first).join(' '));
-    const spaceGroup = tokens.slice(last).join('').replace(/\*+$/, '');
+    // A footnote mark after the symbol ("Cccm*") is dropped; a leading star is AMC's shifted origin.
+    const spaceGroup = tokens.slice(last).join('').replace(/(.)\*+$/, '$1');
     let values;
     if (numbers.length === 6) values = numbers;
     else if (numbers.length === 4) values = [numbers[0], numbers[1], numbers[2], '90', numbers[3], '90'];
@@ -461,8 +515,28 @@ function readCellLines(text) {
     const cell = { a, b, c, alpha, beta, gamma, spaceGroup };
     if (title) result.byTitle.push({ title, cell });
     else result.shared = cell;
+    lastCell = cell;
   }
   return result;
+}
+
+// Each cell line's space group checked against the space group list (the
+// symmetry database's groups and settings), as [{ title, spaceGroup, ok,
+// message }], for showing under the cell box as it is typed.
+function checkCellLines(text) {
+  const cells = readCellLines(normalizeMinusSigns(text || ''));
+  const entries = [...cells.byTitle, ...(cells.shared ? [{ title: '', cell: cells.shared }] : [])];
+  const checks = entries.map(({ title, cell }) => {
+    const raw = cell.spaceGroup || cells.spaceGroup;
+    if (!raw) return { title, spaceGroup: '', ok: false, message: 'no space group after the six numbers' };
+    try {
+      const ops = amcSymmetryMatrices({ ...cell, spaceGroup: raw.replace(/^\*/, ''), starred: raw.startsWith('*') }, cell.shift);
+      return { title, spaceGroup: raw, ok: true, message: `${ops.length} symmetry operations${cell.shift ? `, origin shifted by ${cell.shift}` : ''}` };
+    } catch (err) {
+      return { title, spaceGroup: raw, ok: false, message: err.message };
+    }
+  });
+  return { checks, notes: cells.notes };
 }
 
 // a a c 90 90 120, or a a a alpha alpha alpha: where 1/3 and 2/3 can be special positions.
@@ -509,7 +583,7 @@ function paperDatasetRows(dataset, options, allowThirds, thirdLike) {
   });
 }
 
-// --- Site contents ---
+// --- Site occupancies ---
 // A paper's table gives one row per site, but a site shared by several
 // elements is written in AMC as one row per element at the same coordinates,
 // each with its occupancy. The contents come from the paper's text and
@@ -524,7 +598,7 @@ function paperDatasetRows(dataset, options, allowThirds, thirdLike) {
 const SITE_SPECIES_RE = /^(OH|Wat|H2O|[A-Z][a-z]?(?:\d[+-])?)(\d*\.\d+|\d+)$/;
 const SITE_VACANCY_RE = /^(□|☐|\[\]|vac|vacancy|v)(\d*\.\d+|\d+)?$/i;
 
-// { site: [{ species, occ }] } from the site contents text, plus notes.
+// { site: [{ species, occ }] } from the site occupancies text, plus notes.
 function readSiteContents(text) {
   const sites = new Map();
   const notes = [];
@@ -541,7 +615,7 @@ function readSiteContents(text) {
       if (m) species.push({ species: m[1] === 'H2O' ? 'Wat' : m[1], occ: m[2] });
       else unread.push(token);
     }
-    if (unread.length) notes.push(`Couldn't read ${unread.join(', ')} in the site contents of ${site} (write each as an element and its occupancy, e.g. Al.15).`);
+    if (unread.length) notes.push(`Couldn't read ${unread.join(', ')} in the site occupancies of ${site} (write each as an element and its occupancy, e.g. Al.15).`);
     if (species.length) sites.set(site.replace(/[*:]+$/, ''), species);
   }
   return { sites, notes };
@@ -668,7 +742,7 @@ const PAPER_CELL_PLACEHOLDER = 'a b c alpha beta gamma spacegroup';
 function buildAmcFromPaperTables(tableText, options) {
   tableText = normalizeMinusSigns(tableText);
   options = { ...options, cellText: normalizeMinusSigns(options.cellText || ''), headerText: normalizeMinusSigns(options.headerText || '') };
-  const { datasets, notes } = readPaperTables(tableText, options, options.columnsText || '');
+  const { datasets, notes } = readPaperTables(tableText, options, options.columnsText || '', normalizeMinusSigns(options.anisoTableText || ''), options.anisoColumnsText || '');
   if (!datasets.some(d => d.atoms.length)) {
     const why = notes.length ? ` ${[...new Set(notes)].slice(0, 3).join(' ')}` : '';
     throw new Error(`No atom rows could be read (an atom label followed by numbers, e.g. "M 3375(1) 0 2500 8(1)").${why}`);
@@ -688,6 +762,7 @@ function buildAmcFromPaperTables(tableText, options) {
   const usedSites = new Set();
 
   const blocks = [];
+  const formulas = [];
   const missingCells = [];
   datasets.filter(d => d.atoms.length).forEach((dataset, index) => {
     const named = dataset.title && cells.byTitle.find(entry => sameTitle(entry.title, dataset.title));
@@ -700,14 +775,14 @@ function buildAmcFromPaperTables(tableText, options) {
     const several = datasets.filter(d => d.atoms.length).length > 1;
     const name = dataset.title ? `${dataset.title}: ` : several ? `Dataset ${index + 1}: ` : '';
     // A site the paper labels with two species ("F, OH") is split evenly
-    // unless the site contents say how.
+    // unless the site occupancies say how.
     const sites = new Map(contents.sites);
     const evenSplits = [];
     const fromTable = [];
     for (const atom of dataset.atoms) {
       const site = normalizeAtomLabel(atom.label);
       if (atom.contents && !sites.has(site)) {
-        // The table's occupancy column says what is on the site; Site contents override it.
+        // The table's occupancy column says what is on the site; Site occupancies override it.
         sites.set(site, atom.contents.map(({ species, occ }) => ({ species: species === 'H2O' ? 'Wat' : species, occ })));
         fromTable.push(`${site} ${atom.contents.map(p => p.species + amcOccupancy(p.occ)).join(' ')}`);
         continue;
@@ -717,8 +792,8 @@ function buildAmcFromPaperTables(tableText, options) {
       sites.set(site, atom.shared.map(species => ({ species, occ: share })));
       evenSplits.push(`${site} ${atom.shared.map(s => s + share).join(' ')}`);
     }
-    if (evenSplits.length) notes.push(`${name}Split evenly, as the table doesn't say how: ${evenSplits.join('; ')}. Give the real split under Site contents.`);
-    if (fromTable.length) notes.push(`${name}Site contents taken from the table's occupancy column: ${fromTable.join('; ')}.`);
+    if (evenSplits.length) notes.push(`${name}Split evenly, as the table doesn't say how: ${evenSplits.join('; ')}. Give the real split under Site occupancies.`);
+    if (fromTable.length) notes.push(`${name}Site occupancies taken from the table's occupancy column: ${fromTable.join('; ')}.`);
     const powers = datasetPowers(dataset, options, notes, name);
     const siteRows = paperDatasetRows(dataset, powers, allowThirds, thirdLike);
     const rows = applySiteContents(siteRows, sites, usedSites);
@@ -729,7 +804,7 @@ function buildAmcFromPaperTables(tableText, options) {
     const median = isoValues[Math.floor((isoValues.length - 1) / 2)];
     const outliers = heavyRows.filter(row => parseFloat(row[5]) > 4 * median).map(row => row[0]);
     if (isoValues.length >= 4 && outliers.length) notes.push(`${name}Check the isotropic value of ${outliers.join(', ')}: it is far above the others (median ${median}).`);
-    if (noElement.length) notes.push(`${name}${noElement.join(', ')} ${noElement.length === 1 ? 'names' : 'name'} no element; say what's on ${noElement.length === 1 ? 'it' : 'them'} under Site contents (e.g. ${noElement[0]} Si.85 Al.15).`);
+    if (noElement.length) notes.push(`${name}${noElement.join(', ')} ${noElement.length === 1 ? 'names' : 'name'} no element; say what's on ${noElement.length === 1 ? 'it' : 'them'} under Site occupancies (e.g. ${noElement[0]} Si.85 Al.15).`);
     if (thirdLike.length) {
       notes.push(`${name}${thirdLike.join(', ')} ${thirdLike.length === 1 ? 'looks' : 'look'} like 1/3 or 2/3, which are only special positions in a hexagonal or rhombohedral cell.`);
     }
@@ -741,11 +816,13 @@ function buildAmcFromPaperTables(tableText, options) {
     let cellLine = PAPER_CELL_PLACEHOLDER;
     if (cell && spaceGroup) cellLine = ['a', 'b', 'c', 'alpha', 'beta', 'gamma'].map(k => cell[k]).concat(spaceGroup).join(' ');
     else missingCells.push(dataset.title || `dataset ${index + 1}`);
+    const shiftLines = cell && cell.shift && spaceGroup.startsWith('*') ? [cell.shift] : [];
 
     const block = [
       ...headerLines,
       ...(dataset.title ? [`Sample: ${dataset.title}`] : []),
       cellLine,
+      ...shiftLines,
       ...formatAmcAtomTable(rows, isoLabel, anisoLabel),
     ].join('\n');
 
@@ -756,8 +833,7 @@ function buildAmcFromPaperTables(tableText, options) {
         const [unitCell] = unitCellFromAmc(headerLines.length ? block : `x\n${block}`);
         const chem = UnitCell.chemistry(unitCell.atoms, unitCell.cell, { symmetryCount: unitCell.symmetryCount, idealFormula: options.idealFormula });
         if (!noElement.length) {
-          notes.push(`${name}Formula ${chem.formula}, Z = ${chem.Z}.`);
-          notes.push(chargeBalanceNote(chargeBalance(unitCell.atoms, chem.Z), name));
+          formulas.push({ name: name.replace(/: $/, ''), formula: chem.formula, Z: chem.Z, charge: chargeBalanceNote(chargeBalance(unitCell.atoms, chem.Z), '') });
         }
       } catch (err) {
         notes.push(`${name}${err.message}`);
@@ -767,11 +843,334 @@ function buildAmcFromPaperTables(tableText, options) {
   });
 
   const unusedSites = [...contents.sites.keys()].filter(site => !usedSites.has(site));
-  if (unusedSites.length) notes.push(`Site contents for ${unusedSites.join(', ')} match no atom in the table.`);
+  if (unusedSites.length) notes.push(`Site occupancies for ${unusedSites.join(', ')} match no atom in the table.`);
   if (missingCells.length) {
-    notes.push(`No cell parameters and space group for ${missingCells.join(', ')}: replace the "${PAPER_CELL_PLACEHOLDER}" line, or add them below the table.`);
+    notes.push(`No cell parameters and space group for ${missingCells.join(', ')}: fill in Cell parameters and space group.`);
   }
-  return { text: `${blocks.join('\n\n')}\n`, notes, count: blocks.length };
+  return { text: `${blocks.join('\n\n')}\n`, notes, count: blocks.length, formulas };
+}
+
+// --- Column grid ---
+// A pasted table shown as rows and columns: each cell can be edited (an
+// emptied cell is removed, which clears a stray token), a row can be removed,
+// and above each column a list says what it holds, picked from the AMC
+// column names (or "leave out", for a column that shouldn't go into the AMC).
+// Edits are written back into the paste box, which stays the one source.
+
+const GRID_COLUMN_CHOICES = [
+  ['x', 'x'], ['y', 'y'], ['z', 'z'],
+  ['Uiso', 'Uiso / Ueq'], ['Biso', 'Biso / Beq'], ['occ', 'Occ'],
+  ...['U', 'B', 'beta'].flatMap(p => AMC_ANISO_ORDER.map(ij => [`${p}${ij}`, `${p === 'beta' ? 'β' : p}${ij}`])),
+  ['skip', 'leave out'],
+];
+
+// What one header word names, as a GRID_COLUMN_CHOICES key ('skip' when none).
+function gridColumnKey(word) {
+  const c = scannedColumn(word);
+  if (!c) return 'skip';
+  if (c.kind === 'iso') return c.convention === 'B' ? 'Biso' : 'Uiso';
+  if (c.kind === 'aniso') return c.convention === 'U' ? `U${c.ij}` : /^b(?!eta)/i.test(word) ? `B${c.ij}` : `beta${c.ij}`;
+  return c.kind;
+}
+
+// 'header', 'atom' (an atom row, readable or not) or 'text' (a title or caption).
+function gridLineKind(tokens) {
+  if (readPaperHeader(tokens)) return 'header';
+  if (paperAtomRow(tokens) || brokenAtomRow(tokens)) return 'atom';
+  if (/^0\d{1,2}$/.test(tokens[0]) && tokens.length >= 4 && tokens.slice(1).every(isPaperValue)) return 'atom';
+  return 'text';
+}
+
+// The column choices a header line gives, one per value column.
+function gridHeaderKeys(tokens) {
+  return headerWords(LABEL_COLUMN_RE.test(tokens[0]) ? tokens.slice(1) : tokens).map(gridColumnKey);
+}
+
+const MAIN_DEFAULT_KEYS = ['x', 'y', 'z', 'Uiso', ...AMC_ANISO_ORDER.map(ij => `U${ij}`), 'occ'];
+const ANISO_DEFAULT_KEYS = AMC_ANISO_ORDER.map(ij => `U${ij}`);
+
+// U, B or β: the convention a column name is in (null for x, y, z, occ, leave out).
+const columnFamily = key => (key === 'Uiso' || /^U\d/.test(key) ? 'U' : key === 'Biso' || /^B\d/.test(key) ? 'B' : /^beta/.test(key) ? 'beta' : null);
+
+// A column name moved to another convention: Uiso <-> Biso (β's isotropic
+// term is a B), U11 <-> B11 <-> β11.
+function inFamily(key, family) {
+  if (!family || !columnFamily(key)) return key;
+  if (key === 'Uiso' || key === 'Biso') return family === 'U' ? 'Uiso' : 'Biso';
+  return key.replace(/^(U|B|beta)/, family);
+}
+
+// The names in the order papers print them, in one convention. In the
+// U(i,j) box the six terms come first, then the isotropic term.
+function columnSequence(family, anisoOnly) {
+  const iso = family === 'U' ? 'Uiso' : 'Biso';
+  const aniso = AMC_ANISO_ORDER.map(ij => `${family}${ij}`);
+  return anisoOnly ? [...aniso, iso] : ['x', 'y', 'z', iso, ...aniso, 'occ'];
+}
+
+// The column names after column i is set to value:
+//  - a U, B or β name puts every isotropic and anisotropic column in that
+//    convention (Biso makes U11 B11; β11 makes Uiso Biso);
+//  - a column to the left that had the name takes column i's old one;
+//  - each column to the right (except those left out) takes the next name
+//    in the usual order not already used to its left, so picking Uiso puts
+//    U11 U22 ... after it, and picking U23 then U13 follows the paper's order.
+function relabelColumns(choices, i, value, anisoOnly) {
+  const family = columnFamily(value) || choices.map(columnFamily).find(Boolean) || 'U';
+  const next = choices.map(k => inFamily(k, columnFamily(value)));
+  const previous = inFamily(choices[i], family);
+  next[i] = value;
+  if (value !== 'skip') {
+    const left = next.findIndex((k, j) => j < i && k === value);
+    if (left !== -1) next[left] = previous;
+  }
+  // Only the convention changed (Uiso to Biso, U11 to β11): the order stays.
+  if (previous === value) return next;
+  const sequence = columnSequence(family, anisoOnly);
+  for (let j = i + 1; j < next.length; j++) {
+    if (next[j] === 'skip') continue;
+    const used = new Set(next.slice(0, j));
+    next[j] = sequence.find(k => !used.has(k)) || 'skip';
+  }
+  return next;
+}
+
+function createPasteGrid({ textarea, container, status, defaults, onChange, anisoOnly }) {
+  const grid = { choices: [], chosen: false, signature: '' };
+  const lines = () => textarea.value.replace(/\r\n?/g, '\n').split('\n');
+  const setLine = (index, text) => {
+    const all = lines();
+    all[index] = text;
+    textarea.value = all.join('\n');
+  };
+
+  const analyse = () => {
+    const rows = lines().map((line, index) => ({ index, tokens: paperTableTokens(line) }))
+      .filter(r => r.tokens.length)
+      .map(r => ({ ...r, kind: gridLineKind(r.tokens) }));
+    const header = rows.find(r => r.kind === 'header');
+    const width = Math.max(0, ...rows.filter(r => r.kind === 'atom').map(r => r.tokens.length - 1));
+    return { rows, header, width };
+  };
+
+  // Without a header: the defaults in order; in the U(i,j) box the six terms
+  // come last, after a Ueq or columns to leave out.
+  const defaultKeys = width => {
+    if (anisoOnly) {
+      const extra = Math.max(0, width - 6);
+      return [...Array(extra).fill(extra === 1 ? 'Uiso' : 'skip'), ...ANISO_DEFAULT_KEYS].slice(0, width);
+    }
+    return Array.from({ length: width }, (_, i) => defaults[i] || 'skip');
+  };
+
+  // The columns line for the parser. In the main box it is '' (the parser
+  // reads the paste's own headers, and without one works the columns out from
+  // each row's number of values) until a column is chosen or left out.
+  grid.columnsText = () => {
+    if (!anisoOnly && !grid.chosen && !grid.choices.includes('skip')) return '';
+    return grid.choices.filter(k => k !== 'skip').join(' ');
+  };
+
+  // Column names picked for more than one column, which the parser can't place.
+  grid.duplicates = () => [...new Set(grid.choices.filter((k, i) => k !== 'skip' && grid.choices.indexOf(k) !== i))]
+    .map(k => GRID_COLUMN_CHOICES.find(([value]) => value === k)[1]);
+
+  // The paste with left-out columns taken off its atom rows.
+  grid.text = () => {
+    const skipped = new Set(grid.choices.map((k, i) => (k === 'skip' ? i + 1 : -1)).filter(i => i > 0));
+    if (!skipped.size) return textarea.value;
+    const all = lines();
+    for (const { index, tokens, kind } of analyse().rows) {
+      if (kind === 'atom') all[index] = tokens.filter((_, i) => !skipped.has(i)).join('  ');
+    }
+    return all.join('\n');
+  };
+
+  const cellInput = (value, className) => {
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.value = value;
+    input.className = className;
+    input.spellcheck = false;
+    input.size = Math.max(3, value.length + 1);
+    return input;
+  };
+
+  // A value cell that doesn't read as a number is marked, as its row is left out.
+  const markCell = (input, isLabel) => {
+    const v = input.value.trim();
+    input.classList.toggle('bad', !isLabel && v !== '' && v.split(/\s+/).some(t => !isPaperValue(t)));
+    input.size = Math.max(3, input.value.length + 1);
+  };
+
+  const removeLine = index => {
+    const all = lines();
+    all.splice(index, 1);
+    textarea.value = all.join('\n');
+  };
+
+  // The choices with columns added or removed where a row (the same line as
+  // before, now longer or shorter by the change in width) gained or lost
+  // values; null when no row shows where.
+  const shiftedChoices = (rows, width) => {
+    const delta = width - grid.choices.length;
+    if (!delta || !grid.lastRows) return null;
+    for (const row of rows) {
+      const before = grid.lastRows.get(row.index);
+      if (row.kind !== 'atom' || !before || row.tokens.length - before.length !== delta) continue;
+      const longer = delta > 0 ? row.tokens : before;
+      const shorter = delta > 0 ? before : row.tokens;
+      let at = 1;
+      while (at < shorter.length && shorter[at] === longer[at]) at++;
+      let choices = [...grid.choices];
+      if (delta > 0) choices.splice(at - 1, 0, ...Array(delta).fill('skip'));
+      else choices.splice(at - 1, -delta);
+      // The first three columns are x, y and z in nearly every paper, so they
+      // stay there; a column added among them pushes the next name along.
+      if (!anisoOnly && width >= 3 && ['x', 'y', 'z'].every(k => grid.choices.includes(k))) {
+        choices = ['x', 'y', 'z', ...choices.filter(k => !['x', 'y', 'z'].includes(k))];
+      }
+      return choices.slice(0, width);
+    }
+    return null;
+  };
+
+  grid.render = () => {
+    const { rows, header, width } = analyse();
+    // A new paste (another number of columns or another header) starts the
+    // choices over, except when values were typed into or deleted from a row:
+    // then the columns keep their names and a new column (left out until it is
+    // named) goes in where the values were added, or the name goes with them.
+    const headerText = header ? header.tokens.join(' ') : '';
+    const signature = `${width}|${headerText}`;
+    if (signature !== grid.signature) {
+      const shifted = grid.signature && grid.signature.endsWith(`|${headerText}`) ? shiftedChoices(rows, width) : null;
+      grid.signature = signature;
+      if (shifted) {
+        grid.choices = shifted;
+      } else {
+        grid.chosen = false;
+        const fromHeader = header ? gridHeaderKeys(header.tokens) : null;
+        grid.choices = fromHeader && fromHeader.length === width ? fromHeader : defaultKeys(width);
+      }
+    }
+    grid.lastRows = new Map(rows.filter(r => r.kind === 'atom').map(r => [r.index, r.tokens]));
+
+    status.replaceChildren();
+    if (header) {
+      status.append('Header row found: the column names below come from it. ');
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.className = 'link-button';
+      remove.textContent = 'Remove header row';
+      remove.addEventListener('click', () => {
+        removeLine(header.index);
+        // The choices it gave are kept.
+        grid.signature = `${width}|`;
+        grid.chosen = true;
+        grid.render();
+        onChange();
+      });
+      status.append(remove);
+    } else if (width) {
+      status.append('No header row found: pick what each column holds above the table, or "leave out" for a column that shouldn\'t go into the AMC file.');
+    }
+
+    container.replaceChildren();
+    if (!width) return;
+    const table = document.createElement('table');
+    table.className = 'paste-grid';
+    const head = table.createTHead().insertRow();
+    const atomHead = document.createElement('th');
+    atomHead.textContent = 'atom';
+    head.append(atomHead);
+    // Picking a column's name re-lays the columns after it (see relabelColumns).
+    const selects = [];
+    const showChoice = j => {
+      selects[j].value = grid.choices[j];
+      selects[j].classList.toggle('skip', grid.choices[j] === 'skip');
+      table.querySelectorAll(`td[data-col="${j + 1}"]`).forEach(td => td.classList.toggle('skip', grid.choices[j] === 'skip'));
+    };
+    grid.choices.forEach((key, i) => {
+      const th = document.createElement('th');
+      const select = document.createElement('select');
+      select.setAttribute('aria-label', `Column ${i + 2}`);
+      for (const [value, label] of GRID_COLUMN_CHOICES) select.add(new Option(label, value, false, value === key));
+      select.classList.toggle('skip', key === 'skip');
+      select.addEventListener('change', () => {
+        grid.choices = relabelColumns(grid.choices, i, select.value, anisoOnly);
+        grid.chosen = true;
+        grid.choices.forEach((_, j) => showChoice(j));
+        onChange();
+      });
+      selects.push(select);
+      th.append(select);
+      head.append(th);
+    });
+    head.append(document.createElement('th'));
+
+    const body = table.createTBody();
+    for (const row of rows) {
+      const tr = body.insertRow();
+      tr.className = `grid-${row.kind}`;
+      if (row.kind === 'atom') {
+        const inputs = [];
+        for (let i = 0; i <= width; i++) {
+          const td = tr.insertCell();
+          td.dataset.col = i;
+          if (i > 0 && grid.choices[i - 1] === 'skip') td.classList.add('skip');
+          if (i >= row.tokens.length) continue;
+          // A value is shown as it goes into the AMC, without its uncertainty
+          // ("3375(1)" shows 3375). The uncertainty is kept in the paste, as it
+          // tells a refined coordinate from a special position, and stays on
+          // the value when the cell is edited.
+          const su = i > 0 && isPaperValue(row.tokens[i]) ? (row.tokens[i].match(/\(\d+\)$/) || [''])[0] : '';
+          const input = cellInput(su ? row.tokens[i].slice(0, -su.length) : row.tokens[i], i === 0 ? 'grid-label' : 'grid-value');
+          input.dataset.su = su;
+          if (su) input.title = `Printed as ${row.tokens[i]}`;
+          markCell(input, i === 0);
+          input.addEventListener('input', () => {
+            markCell(input, i === 0);
+            const token = inp => {
+              const v = inp.value.trim();
+              return v && inp.dataset.su && !/[\s(]/.test(v) ? v + inp.dataset.su : v;
+            };
+            setLine(row.index, inputs.map(token).filter(Boolean).join('  '));
+            onChange();
+          });
+          // Once the edit is done the row is split again, so a cell typed as two values becomes two.
+          input.addEventListener('change', () => grid.render());
+          inputs.push(input);
+          td.append(input);
+        }
+      } else {
+        const td = tr.insertCell();
+        td.colSpan = width + 1;
+        const input = cellInput(lines()[row.index].trim(), 'grid-line');
+        input.title = row.kind === 'header' ? 'Header row' : 'A title (it names the dataset below it) or a caption';
+        input.addEventListener('input', () => { setLine(row.index, input.value); onChange(); });
+        input.addEventListener('change', () => grid.render());
+        td.append(input);
+      }
+      const removeCell = tr.insertCell();
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.className = 'grid-remove';
+      remove.title = 'Remove this row';
+      remove.setAttribute('aria-label', 'Remove this row');
+      remove.textContent = '×';
+      remove.addEventListener('click', () => {
+        removeLine(row.index);
+        grid.render();
+        onChange();
+      });
+      removeCell.append(remove);
+    }
+    container.append(table);
+  };
+
+  textarea.addEventListener('input', () => { grid.render(); onChange(); });
+  return grid;
 }
 
 // --- Page ---
@@ -781,6 +1180,25 @@ if (typeof document !== 'undefined' && document.getElementById('tableToAmcSectio
   const power = id => {
     const n = parseInt(field(id).value, 10);
     return Number.isFinite(n) ? n : 0;
+  };
+
+  // The header fields, each filled from the record loaded with ?UUID= (see
+  // amcHeaderFields in app.js) unless it has been typed in since. They only
+  // make the AMC text here: nothing is written to the record.
+  const HEADER_FIELDS = {
+    tableNameInput: 'name',
+    tableAuthorsInput: 'authors',
+    tableJournalInput: 'journal',
+    tableTitleInput: 'title',
+    tableExtraInput: 'extra',
+    tableLocalityInput: 'locality',
+    tableCodeInput: 'code',
+  };
+  const headerText = () => {
+    const fields = {};
+    for (const [id, key] of Object.entries(HEADER_FIELDS)) fields[key] = normalizeMinusSigns(field(id).value);
+    if (!Object.values(fields).some(v => v.trim())) return '';
+    return amcHeaderLines(fields).flatMap(line => wrapText(toAscii(line), 80)).join('\n');
   };
 
   // Once the output is edited by hand (its Edit button, set up in app.js),
@@ -825,63 +1243,147 @@ if (typeof document !== 'undefined' && document.getElementById('tableToAmcSectio
     status.append(details);
   };
 
+  // The formula worked out from the atoms, per dataset, updated with every edit.
+  const showFormulas = formulas => {
+    const box = field('tableFormula');
+    box.replaceChildren();
+    for (const { name, formula, Z, charge } of formulas) {
+      const line = document.createElement('p');
+      const strong = document.createElement('strong');
+      strong.textContent = formula;
+      line.append(`${name ? `${name}: ` : ''}Formula from the data `, strong, ` · Z = ${Z} · ${charge}`);
+      box.append(line);
+    }
+  };
+
+  // Each space group checked against the space group list as it is typed.
+  const showCellChecks = () => {
+    const box = field('tableCellCheck');
+    box.replaceChildren();
+    const { checks, notes } = checkCellLines(field('tableCellInput').value);
+    for (const { title, spaceGroup, ok, message } of checks) {
+      const item = document.createElement('li');
+      item.className = ok ? 'ok' : 'bad';
+      item.textContent = `${title ? `${title}: ` : ''}${spaceGroup ? `${spaceGroup}: ` : ''}${message}`;
+      box.append(item);
+    }
+    for (const note of notes) {
+      const item = document.createElement('li');
+      item.className = 'bad';
+      item.textContent = note;
+      box.append(item);
+    }
+  };
+
+  // The ideal formula of the record's IMA mineral, shown (not editable) by the name.
+  const showIdealFormula = () => {
+    const box = field('tableIdealFormula');
+    const ideal = typeof imaIdealFormula === 'function' && typeof currentApiRecord !== 'undefined' ? imaIdealFormula(currentApiRecord) : '';
+    box.hidden = !ideal;
+    box.textContent = ideal ? `IMA ideal formula: ${sanitizeCitationText(ideal)}` : '';
+  };
+
+  // Before any atoms are pasted, the header and cell lines on their own, so
+  // the file can be seen as it is built.
+  const headerAndCellPreview = () => {
+    const cells = readCellLines(normalizeMinusSigns(field('tableCellInput').value));
+    const cellLines = [...cells.byTitle.map(e => e.cell), ...(cells.shared ? [cells.shared] : [])].flatMap(cell => [
+      ['a', 'b', 'c', 'alpha', 'beta', 'gamma'].map(k => cell[k]).concat(cell.spaceGroup || cells.spaceGroup).join(' ').trim(),
+      ...(cell.shift ? [cell.shift] : []),
+    ]);
+    return [headerText(), ...cellLines].filter(Boolean).join('\n');
+  };
+
+  let mainGrid = null;
+  let anisoGrid = null;
+
   const convertPaperTables = () => {
     const output = field('tableToAmcOutput');
-    const tableText = field('tableInput').value;
+    showCellChecks();
     if (handEdited) {
       showStatus(HAND_EDITED_NOTE);
       return;
     }
-    if (!tableText.trim()) {
-      output.value = '';
-      showStatus('');
+    const tableText = mainGrid.text();
+    // Every AMC atom has x, y and z, so none can be left out; reading the
+    // table without one would slide the next column's values into its place.
+    const missingAxes = mainGrid.choices.length ? ['x', 'y', 'z'].filter(k => !mainGrid.choices.includes(k)) : [];
+    if (!tableText.trim() || missingAxes.length) {
+      const preview = headerAndCellPreview();
+      output.value = preview ? toAscii(`${preview}\n`) : '';
+      showFormulas([]);
+      if (missingAxes.length) {
+        showStatus(`Every atom needs x, y and z: pick a column for ${missingAxes.join(', ')} in the atom table.`, [], true);
+      } else {
+        showStatus(preview ? 'Paste the atom table to add the atoms.' : '');
+      }
       autoSizeTextarea(output);
       return;
     }
     try {
-      const { text, notes, count } = buildAmcFromPaperTables(tableText, {
+      const { text, notes, count, formulas } = buildAmcFromPaperTables(tableText, {
         xyzPower: power('tableXyzPower'),
         isoPower: power('tableIsoPower'),
         anisoPower: power('tableAnisoPower'),
         allowThirds: field('tableHexagonal').checked,
-        columnsText: field('tableColumnsInput').value,
+        columnsText: mainGrid.columnsText(),
+        anisoTableText: anisoGrid.text(),
+        anisoColumnsText: anisoGrid.columnsText(),
         cellText: field('tableCellInput').value,
         siteText: field('tableSiteInput').value,
-        headerText: field('tableHeaderInput').value,
+        headerText: headerText(),
         idealFormula: typeof imaIdealFormula === 'function' && typeof currentApiRecord !== 'undefined' ? imaIdealFormula(currentApiRecord) : undefined,
       });
       output.value = toAscii(text);
-      const unique = [...new Set(notes)];
+      showFormulas(formulas);
+      const duplicates = [['atom table', mainGrid], ['anisotropic table', anisoGrid]]
+        .filter(([, grid]) => grid.duplicates().length)
+        .map(([name, grid]) => `In the ${name}, ${grid.duplicates().join(', ')} ${grid.duplicates().length === 1 ? 'is' : 'are'} picked for more than one column; pick each once.`);
+      const unique = [...new Set([...duplicates, ...notes])];
       showStatus(`${count} dataset${count === 1 ? '' : 's'}${unique.length ? ` · ${unique.length} note${unique.length === 1 ? '' : 's'}` : ''}`, unique);
     } catch (err) {
-      output.value = '';
+      const preview = headerAndCellPreview();
+      output.value = preview ? toAscii(`${preview}\n`) : '';
+      showFormulas([]);
       showStatus(err.message, [], true);
     }
     autoSizeTextarea(output);
   };
 
-  // The header comes from the record loaded from ?UUID= (the CIF -> AMC
-  // Header box's header, up to its cell line), whenever the record or its CIF
-  // loads - unless the header box has been edited since it was last filled.
-  let filledHeader = '';
-  const recordHeader = () => {
-    if (typeof currentApiRecord === 'undefined' || !currentApiRecord) return '';
-    const data = currentCifData || { blockName: '', tags: {}, loops: [], blocks: [] };
-    const lines = buildAmcHeader(data, currentApiRecord, currentFileName).split('\n');
-    const end = lines.findIndex(l => isAmcCellLine(l) || isAtomTableHeaderLine(l));
-    return (end === -1 ? lines : lines.slice(0, end)).join('\n');
-  };
+  mainGrid = createPasteGrid({
+    textarea: field('tableInput'),
+    container: field('tableGrid'),
+    status: field('tableHeaderStatus'),
+    defaults: MAIN_DEFAULT_KEYS,
+    onChange: convertPaperTables,
+  });
+  anisoGrid = createPasteGrid({
+    textarea: field('tableAnisoInput'),
+    container: field('tableAnisoGrid'),
+    status: field('tableAnisoHeaderStatus'),
+    defaults: ANISO_DEFAULT_KEYS,
+    onChange: convertPaperTables,
+    anisoOnly: true,
+  });
+
+  const filled = {};
   document.addEventListener('amcheaderchange', () => {
-    const box = field('tableHeaderInput');
-    if (box.value.trim() && box.value !== filledHeader) return;
-    let header = '';
-    try { header = recordHeader(); } catch (err) { return; }
-    if (!header) return;
-    box.value = filledHeader = header;
+    showIdealFormula();
+    if (typeof currentApiRecord === 'undefined' || !currentApiRecord) return;
+    let fields;
+    try {
+      fields = amcHeaderFields(currentCifData || { blockName: '', tags: {}, loops: [], blocks: [] }, currentApiRecord, currentFileName);
+    } catch (err) { return; }
+    if (fields.name === 'No Name Found') fields.name = '';
+    for (const [id, key] of Object.entries(HEADER_FIELDS)) {
+      const box = field(id);
+      if (fields[key] === undefined || (box.value.trim() && box.value !== filled[id])) continue;
+      box.value = filled[id] = toAscii(fields[key]);
+    }
     convertPaperTables();
   });
 
-  ['tableInput', 'tableColumnsInput', 'tableCellInput', 'tableSiteInput', 'tableHeaderInput', 'tableXyzPower', 'tableIsoPower', 'tableAnisoPower', 'tableHexagonal']
+  [...Object.keys(HEADER_FIELDS), 'tableCellInput', 'tableSiteInput', 'tableXyzPower', 'tableIsoPower', 'tableAnisoPower', 'tableHexagonal']
     .forEach(id => field(id).addEventListener('input', convertPaperTables));
   field('tableToAmcOutput').addEventListener('input', () => {
     handEdited = true;
@@ -905,4 +1407,5 @@ if (typeof document !== 'undefined' && document.getElementById('tableToAmcSectio
     link.click();
     URL.revokeObjectURL(link.href);
   });
+  showIdealFormula();
 }

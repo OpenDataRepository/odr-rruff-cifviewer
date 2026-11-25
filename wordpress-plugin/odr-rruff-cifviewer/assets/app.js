@@ -505,10 +505,11 @@ function amcSpaceGroupFromCif(data, sg, cell, pickFirst = false) {
   throw new Error(`The CIF's symmetry operators don't match ${name} at any origin.`);
 }
 
-function buildAmcHeader(data, apiRecord, fileName) {
-  const lines = [];
-  lines.push(getMineralName(data, apiRecord, fileName));
-  lines.push(formatAuthors(data, apiRecord));
+// The AMC header's text fields: { name, authors, journal, title (may hold several
+// lines), locality, code }, '' where there's none. The paper-table converter
+// (table2amc.js) fills its own header fields from these.
+function amcHeaderFields(data, apiRecord, fileName) {
+  const fields = { name: getMineralName(data, apiRecord, fileName), authors: formatAuthors(data, apiRecord) };
 
   // The API record (already fetched and looked up deliberately) takes priority over
   // the CIF's own header fields, which are frequently unfilled/boilerplate - the CIF
@@ -528,22 +529,33 @@ function buildAmcHeader(data, apiRecord, fileName) {
   } else if (pageFirst) {
     journalLine += ` ${pageFirst}${pageLast ? '-' + pageLast : ''}`;
   }
-  lines.push(journalLine.trim());
+  fields.journal = journalLine.trim();
 
-  const title = getCitationField(apiRecord, 'Article Title') || getTag(data, '_publ_section_title');
-  if (title) {
-    title
-      .split('\n')
-      .map(l => l.trim())
-      .filter(l => l.length)
-      .forEach(l => lines.push(l));
-  }
+  const title = getCitationField(apiRecord, 'Article Title') || getTag(data, '_publ_section_title') || '';
+  fields.title = title.split('\n').map(l => l.trim()).filter(l => l.length).join('\n');
+  fields.locality = getApiField(apiRecord, 'Locality') || getTag(data, '_chemical_compound_source') || '';
+  fields.code = getApiField(apiRecord, 'database_code_amcsd') || getTag(data, '_database_code_amcsd') || '';
+  return fields;
+}
 
-  const locality = getApiField(apiRecord, 'Locality') || getTag(data, '_chemical_compound_source');
-  if (locality) lines.push(`Locality: ${locality}`);
+// The header lines from amcHeaderFields-shaped fields, in AMC order: name, authors,
+// journal, title, any extra lines (notes, pressure, temperature), "Locality: ...",
+// "_database_code_amcsd ...". Name, authors and journal always get a line.
+function amcHeaderLines({ name, authors, journal, title, extra, locality, code }) {
+  const lines = text => (text || '').split('\n').map(l => l.trim()).filter(Boolean);
+  return [
+    name || '',
+    authors || '',
+    journal || '',
+    ...lines(title),
+    ...lines(extra),
+    ...(locality ? [`Locality: ${locality}`] : []),
+    ...(code ? [`_database_code_amcsd ${code}`] : []),
+  ];
+}
 
-  const amcsd = getApiField(apiRecord, 'database_code_amcsd') || getTag(data, '_database_code_amcsd');
-  if (amcsd) lines.push(`_database_code_amcsd ${amcsd}`);
+function buildAmcHeader(data, apiRecord, fileName) {
+  const lines = amcHeaderLines(amcHeaderFields(data, apiRecord, fileName));
 
   // Cell parameters and space group must come only from the CIF file, not the API.
   const a = getTag(data, '_cell_length_a');
