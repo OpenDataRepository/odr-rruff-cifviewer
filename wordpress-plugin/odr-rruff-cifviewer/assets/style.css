@@ -262,6 +262,267 @@
   color: #9b2c2c;
 }
 
+/* Paper Table -> AMC: one field per line, a card each, in AMC order. */
+#tableToAmcSection .table-card {
+  margin-bottom: 0.9rem;
+}
+
+#tableToAmcSection input[type="text"] {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid #cfd9e5;
+  border-radius: 8px;
+  font: inherit;
+  font-size: 0.9rem;
+}
+
+#tableToAmcSection input[type="text"]:focus {
+  outline: none;
+  border-color: #3b6fd8;
+  box-shadow: 0 0 0 3px rgba(59, 111, 216, 0.15);
+}
+
+.table-card-title {
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+
+.table-sublabel {
+  display: block;
+  margin: 0.5rem 0 0.25rem;
+  color: #3d4b5c;
+  font-size: 0.82rem;
+}
+
+.table-sublabel:first-of-type {
+  margin-top: 0;
+}
+
+/* Shown, not edited: the record's IMA ideal formula. */
+.table-fixed {
+  margin: 0.5rem 0 0;
+  padding: 0.35rem 0.6rem;
+  border-radius: 8px;
+  background: #f6f8fb;
+  color: #3d4b5c;
+  font-size: 0.85rem;
+}
+
+.table-checks {
+  margin: 0.4rem 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.82rem;
+}
+
+.table-checks li.ok {
+  color: #2f6b3a;
+}
+
+.table-checks li.ok::before {
+  content: '\2713  ';
+}
+
+.table-checks li.bad {
+  color: #9b2c2c;
+}
+
+.table-checks li.bad::before {
+  content: '\2717  ';
+}
+
+.link-button {
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  color: #3b6fd8;
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+/* The pasted table as editable rows and columns: compact columns on the
+   left, a header band across the full width, numbers right-aligned. */
+.table-grid-wrap {
+  overflow-x: auto;
+}
+
+.table-grid-wrap:not(:empty) {
+  margin-top: 0.5rem;
+  max-height: 28rem;
+  overflow-y: auto;
+  border: 1px solid #dbe5f0;
+  border-radius: 10px;
+}
+
+.paste-grid {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 0.82rem;
+}
+
+.paste-grid th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 0.35rem 0.25rem;
+  background: #f3f6fa;
+  border-bottom: 1px solid #dbe5f0;
+  color: #3d4b5c;
+  font-weight: 600;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.paste-grid th:first-child {
+  padding-left: 0.75rem;
+  text-align: left;
+}
+
+/* The last column (the row's remove button) takes the spare width, so the
+   data columns stay together on the left. */
+.paste-grid th:last-child,
+.paste-grid td:last-child {
+  width: 100%;
+}
+
+.paste-grid select {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 100%;
+  min-width: 6.2rem;
+  margin: 0;
+  padding: 0.2rem 1.2rem 0.2rem 0.4rem;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5'%3E%3Cpath d='M0 0l4 5 4-5z' fill='%235b6b7d'/%3E%3C/svg%3E") no-repeat right 0.4rem center;
+  color: #1f3b63;
+  font: inherit;
+  font-weight: 600;
+  text-align: right;
+  text-align-last: right;
+  cursor: pointer;
+}
+
+.paste-grid select:hover,
+.paste-grid select:focus {
+  border-color: #cfd9e5;
+  background-color: #ffffff;
+  outline: none;
+}
+
+.paste-grid select.skip {
+  color: #b0473f;
+  font-weight: normal;
+}
+
+.paste-grid td {
+  padding: 0 0.25rem;
+  border-bottom: 1px solid #f0f3f7;
+  white-space: nowrap;
+}
+
+.paste-grid td:first-child {
+  padding-left: 0.5rem;
+}
+
+.paste-grid tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.paste-grid tbody tr:hover td {
+  background: #f8fafd;
+}
+
+.paste-grid td.skip input {
+  text-decoration: line-through;
+  opacity: 0.45;
+}
+
+#tableToAmcSection .paste-grid input[type="text"] {
+  width: 100%;
+  padding: 0.25rem 0.4rem;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  font-family: inherit;
+  font-size: inherit;
+  text-align: right;
+  box-shadow: none;
+}
+
+#tableToAmcSection .paste-grid input[type="text"]:hover {
+  border-color: #dbe5f0;
+  background: #ffffff;
+}
+
+#tableToAmcSection .paste-grid input[type="text"]:focus {
+  border-color: #3b6fd8;
+  background: #ffffff;
+  box-shadow: 0 0 0 2px rgba(59, 111, 216, 0.15);
+}
+
+#tableToAmcSection .paste-grid input.grid-label {
+  min-width: 4rem;
+  font-weight: 600;
+  text-align: left;
+}
+
+#tableToAmcSection .paste-grid input.grid-line {
+  font-style: italic;
+  color: #5b6b7d;
+  text-align: left;
+}
+
+#tableToAmcSection .paste-grid input.bad {
+  border-color: #d9534f;
+  background: #fdf0f0;
+  color: #9b2c2c;
+}
+
+.grid-remove {
+  margin: 0;
+  padding: 0.15rem 0.45rem;
+  border: none;
+  border-radius: 5px;
+  background: none;
+  color: #9aa7b6;
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+}
+
+.paste-grid tr:hover .grid-remove,
+.grid-remove:focus {
+  opacity: 1;
+}
+
+.grid-remove:hover {
+  background: #fdf0f0;
+  color: #9b2c2c;
+}
+
+.table-formula:empty {
+  display: none;
+}
+
+.table-formula {
+  margin-bottom: 0.6rem;
+  padding: 0.5rem 0.8rem;
+  border-radius: 8px;
+  background: #eef6ef;
+  color: #23432a;
+  font-size: 0.88rem;
+}
+
+.table-formula p {
+  margin: 0;
+}
+
 /* An output box opened with its Edit button. */
 .cif-viewer-app textarea.editing {
   background: #fffbea;
