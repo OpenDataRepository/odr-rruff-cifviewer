@@ -67,49 +67,82 @@
 
       <div id="tableToAmcSection">
         <h3>Paper Table &rarr; AMC</h3>
-        <p class="table-intro">Paste an atom table copied from a paper. Several datasets can go in at once, each under its own title line (e.g. Phl1a), with a separate U(i,j) table after them if the paper has one.</p>
+        <p class="table-intro">Fill in the fields from top to bottom, in the order they go into the AMC file, which is built below as you type. Fields are filled from the record loaded with ?UUID=; they only make the AMC text here and change nothing in the record.</p>
 
-        <div class="table-paste">
-          <div class="table-card-head">
-            <label for="tableInput">Atom table</label>
-            <span class="table-hint">header row included</span>
-          </div>
-          <textarea id="tableInput" rows="8" spellcheck="false" placeholder="Atom  x  y  z  Beq  B11  B22  B33  B12  B13  B23&#10;O1  0.0049(7)  0  0.1716(3)  2.30(8)  255(14)  49(4)  56(3)  0  2(5)  0&#10;M1  0  0  0.5  1.58(5)  121(7)  36(2)  56(2)  0  26(3)  0"></textarea>
+        <div class="table-card">
+          <div class="table-card-head"><label for="tableNameInput">Name</label></div>
+          <input type="text" id="tableNameInput" spellcheck="false" placeholder="Mineral or chemical name">
+          <p id="tableIdealFormula" class="table-fixed" hidden></p>
         </div>
 
-        <div class="table-cards">
-          <div class="table-card">
-            <div class="table-card-head">
-              <label for="tableCellInput">Cell parameters</label>
-              <span class="table-optional">optional</span>
-            </div>
-            <textarea id="tableCellInput" rows="3" spellcheck="false" placeholder="Phl1a 5.306(1) 9.195(3) 10.272(3) 90 100.01(2) 90 C2/m"></textarea>
-            <p class="table-hint">One line per dataset. Four numbers are a b c &beta;; a line with only a space group sets it for all.</p>
+        <div class="table-card">
+          <div class="table-card-head"><span class="table-card-title">Reference</span></div>
+          <label class="table-sublabel" for="tableAuthorsInput">Authors</label>
+          <input type="text" id="tableAuthorsInput" spellcheck="false" placeholder="Smith J, Jones A">
+          <label class="table-sublabel" for="tableJournalInput">Journal, volume, year, pages</label>
+          <input type="text" id="tableJournalInput" spellcheck="false" placeholder="American Mineralogist 85 (2000) 1-10">
+          <label class="table-sublabel" for="tableTitleInput">Title</label>
+          <textarea id="tableTitleInput" rows="2" spellcheck="false" placeholder="Title of the paper"></textarea>
+        </div>
+
+        <div class="table-card">
+          <div class="table-card-head">
+            <label for="tableExtraInput">Other lines</label>
+            <span class="table-optional">optional</span>
           </div>
-          <div class="table-card">
-            <div class="table-card-head">
-              <label for="tableSiteInput">Site contents</label>
-              <span class="table-optional">optional</span>
-            </div>
-            <textarea id="tableSiteInput" rows="3" spellcheck="false" placeholder="T1 Si.85 Al.15&#10;M1 Li.35 Al.10 Fe2+.07 &#9633;.55"></textarea>
-            <p class="table-hint">What each site holds, from the paper's chemistry and text. Each site becomes one row per element.</p>
+          <textarea id="tableExtraInput" rows="2" spellcheck="false" placeholder="Sample: ...&#10;P = 2.5 GPa, T = 300 K"></textarea>
+          <p class="table-hint">Notes, sample IDs, pressure, temperature: each line goes into the header as typed, after the title.</p>
+        </div>
+
+        <div class="table-card">
+          <div class="table-card-head">
+            <label for="tableLocalityInput">Locality</label>
+            <span class="table-optional">optional</span>
           </div>
-          <div class="table-card">
-            <div class="table-card-head">
-              <label for="tableColumnsInput">Columns</label>
-              <span class="table-optional">optional</span>
-            </div>
-            <textarea id="tableColumnsInput" rows="1" spellcheck="false" placeholder="x y z Beq B11 B22 B33 B12 B13 B23"></textarea>
-            <p class="table-hint">Type the header when the pasted one comes out garbled; it replaces any header in the paste.</p>
+          <input type="text" id="tableLocalityInput" spellcheck="false" placeholder="Allumiere, Italy">
+        </div>
+
+        <div class="table-card">
+          <div class="table-card-head">
+            <label for="tableCodeInput">AMCSD code</label>
+            <span class="table-optional">if it has one</span>
           </div>
-          <div class="table-card">
-            <div class="table-card-head">
-              <label for="tableHeaderInput">AMC header</label>
-              <span class="table-optional">from the record</span>
-            </div>
-            <textarea id="tableHeaderInput" rows="3" spellcheck="false" placeholder="Mineral name&#10;Authors&#10;Journal, volume, pages, year&#10;Title"></textarea>
-            <p class="table-hint">Filled from the record loaded with ?UUID=; edit as needed. It goes in front of every dataset.</p>
+          <input type="text" id="tableCodeInput" spellcheck="false" placeholder="0012345">
+        </div>
+
+        <div class="table-card">
+          <div class="table-card-head"><label for="tableCellInput">Cell parameters and space group</label></div>
+          <textarea id="tableCellInput" rows="2" spellcheck="false" placeholder="17.158 9.7573 9.3228 90 90 90 Cccm"></textarea>
+          <ul id="tableCellCheck" class="table-checks"></ul>
+          <p class="table-hint">a b c alpha beta gamma space group (four numbers are a b &beta;). For a shifted origin, star the space group (*Fd-3m) and put the shift on the next line. Several datasets: one line each, starting with the dataset's title; a line with only a space group sets it for all. Each space group is checked against the space group list.</p>
+        </div>
+
+        <div class="table-card">
+          <div class="table-card-head"><label for="tableInput">Atom table</label></div>
+          <textarea id="tableInput" rows="4" spellcheck="false" placeholder="Paste the table of atoms: a label, then x y z and the rest of its values on each line.&#10;M  3375(1)  0  2500  8(1)&#10;Al11  2500  2500  2501(1)  8(1)"></textarea>
+          <p id="tableHeaderStatus" class="table-hint"></p>
+          <div id="tableGrid" class="table-grid-wrap"></div>
+          <p class="table-hint">Pick what each column holds above it (or leave it out), and fix cells in place: a cell that doesn't read as a number is red, and an emptied cell is removed. Several datasets can go in at once, each under its own title line.</p>
+        </div>
+
+        <div class="table-card">
+          <div class="table-card-head">
+            <label for="tableAnisoInput">Anisotropic table</label>
+            <span class="table-optional">when the paper prints it separately</span>
           </div>
+          <textarea id="tableAnisoInput" rows="3" spellcheck="false" placeholder="M  7(1)  7(1)  10(1)  0  0  0"></textarea>
+          <p id="tableAnisoHeaderStatus" class="table-hint"></p>
+          <div id="tableAnisoGrid" class="table-grid-wrap"></div>
+          <p class="table-hint">The U(i,j) rows, matched to the atom table by label. Set the column order above to the paper's (e.g. U11 U22 U33 U23 U13 U12).</p>
+        </div>
+
+        <div class="table-card">
+          <div class="table-card-head">
+            <label for="tableSiteInput">Site occupancies</label>
+            <span class="table-optional">optional</span>
+          </div>
+          <textarea id="tableSiteInput" rows="2" spellcheck="false" placeholder="T1 Si.85 Al.15&#10;M1 Li.35 Al.10 Fe2+.07 &#9633;.55"></textarea>
+          <p class="table-hint">What each site holds, from the paper's chemistry and text. Each site becomes one row per element.</p>
         </div>
 
         <details class="table-options">
@@ -132,6 +165,7 @@
               <button id="discardTableToAmcEditsBtn" hidden>Discard edits</button>
             </div>
           </div>
+          <div id="tableFormula" class="table-formula"></div>
           <div id="tableToAmcStatus" class="table-notes"></div>
           <textarea id="tableToAmcOutput" readonly rows="1"></textarea>
         </div>
